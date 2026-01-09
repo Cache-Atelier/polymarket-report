@@ -152,6 +152,7 @@
     async function fetchMarkets() {
       try {
         // Fetch from our Vercel serverless function (bypasses CORS)
+        // This proxies Polymarket's /api/biggest-movers endpoint
         const response = await fetch('/api/markets');
 
         if (!response.ok) {
@@ -159,8 +160,11 @@
         }
 
         const data = await response.json();
-        console.log(`✓ Fetched ${data.length} events from Polymarket`);
-        return data;
+
+        // Data structure: {markets: [...]}
+        const markets = data.markets || [];
+        console.log(`✓ Fetched ${markets.length} biggest movers from Polymarket`);
+        return markets;
       } catch (error) {
         console.error('Failed to fetch markets:', error);
         showError('Error loading markets. Please refresh the page.');
@@ -169,39 +173,8 @@
     }
 
     // ============================================
-    // RANKING ALGORITHM
+    // DATA PROCESSING
     // ============================================
-    function processEvents(events) {
-      // Transform events into market objects we can rank
-      // Events have nested "markets" array - we take the first active market
-      const processed = [];
-
-      for (const event of events) {
-        if (!event.active || event.closed) continue;
-        if (!event.markets || event.markets.length === 0) continue;
-
-        // Find first active market in this event
-        const activeMarket = event.markets.find(m => m.active && !m.closed);
-        if (!activeMarket) continue;
-
-        // Check for required data
-        if (activeMarket.oneDayPriceChange === null || activeMarket.oneDayPriceChange === undefined) continue;
-        if (!event.volume24hr) continue;
-
-        // Create a combined object with data from both event and market
-        processed.push({
-          title: event.title,
-          slug: event.slug,
-          volume24hr: event.volume24hr,
-          oneDayPriceChange: activeMarket.oneDayPriceChange,
-          lastTradePrice: activeMarket.lastTradePrice || 0.5,
-          question: activeMarket.question || event.title
-        });
-      }
-
-      return processed;
-    }
-
     function calculatePriceChange(market) {
       // oneDayPriceChange is in decimal format: -0.0115 = -1.15%
       const change = market.oneDayPriceChange;
@@ -211,44 +184,36 @@
       return Math.abs(change * 100);
     }
 
-    function rankMarkets(events) {
-      // Process events into market objects
-      const processed = processEvents(events);
+    function processMarkets(markets) {
+      // Markets from biggest-movers are already sorted by movement
+      // Just need to prepare them for rendering
 
-      console.log(`✓ Processed ${processed.length} valid markets from ${events.length} events`);
+      console.log(`✓ Processing ${markets.length} markets`);
 
-      if (processed.length === 0) {
-        console.error('No valid markets found!');
+      if (markets.length === 0) {
+        console.error('No markets available!');
         return [];
       }
 
-      // Filter by minimum volume (avoid low-liquidity noise)
-      const filtered = processed.filter(m => m.volume24hr >= MIN_VOLUME);
-
-      console.log(`✓ Filtered to ${filtered.length} markets with volume >= $${MIN_VOLUME.toLocaleString()}`);
-
-      // Sort by absolute 24hr price change (pure "Breaking" algorithm)
-      filtered.sort((a, b) => {
-        const aChange = Math.abs(a.oneDayPriceChange);
-        const bChange = Math.abs(b.oneDayPriceChange);
-        return bChange - aChange;
-      });
-
-      // Attach price change percent for easy access
-      const withPercent = filtered.map(market => ({
-        ...market,
+      // Attach price change percent and prepare data
+      const processed = markets.map(market => ({
+        title: market.question || market.title || 'Unknown Market',
+        question: market.question || market.title || 'Unknown Market',
+        slug: market.slug,
+        oneDayPriceChange: market.oneDayPriceChange,
         priceChangePercent: calculatePriceChange(market)
       }));
 
       // Log top 10 for debugging
-      console.log('Top 10 markets by 24hr movement:');
-      withPercent.slice(0, 10).forEach((m, i) => {
+      console.log('Top 10 biggest movers:');
+      processed.slice(0, 10).forEach((m, i) => {
         const displayTitle = m.title.substring(0, 60);
-        console.log(`${i + 1}. ${displayTitle}... (Δ: ${m.priceChangePercent.toFixed(1)}%)`);
+        const sign = market.oneDayPriceChange >= 0 ? '+' : '';
+        console.log(`${i + 1}. ${displayTitle}... (${sign}${(m.oneDayPriceChange * 100).toFixed(1)}%)`);
       });
 
-      // Return top N markets
-      return withPercent.slice(0, TOTAL_MARKETS);
+      // Return top N markets (or all if less than N)
+      return processed.slice(0, TOTAL_MARKETS);
     }
 
     // ============================================
@@ -334,7 +299,7 @@
     // ============================================
     async function init() {
       console.log('🚀 Initializing Polymarket Report...');
-      console.log(`Configuration: ${TOTAL_MARKETS} markets, $${MIN_VOLUME.toLocaleString()} min volume, ${RED_THRESHOLD}% red threshold`);
+      console.log(`Configuration: ${TOTAL_MARKETS} markets max, ${RED_THRESHOLD}% red threshold`);
 
       const markets = await fetchMarkets();
 
@@ -342,13 +307,13 @@
         return; // Error already displayed
       }
 
-      const ranked = rankMarkets(markets);
+      const processed = processMarkets(markets);
 
-      if (ranked.length < TOTAL_MARKETS) {
-        console.warn(`⚠ Only found ${ranked.length} valid markets (requested ${TOTAL_MARKETS})`);
+      if (processed.length < TOTAL_MARKETS) {
+        console.log(`ℹ Showing ${processed.length} markets (Polymarket provides ${markets.length} biggest movers)`);
       }
 
-      renderMarkets(ranked);
+      renderMarkets(processed);
 
       console.log('✓ Polymarket Report loaded successfully');
     }

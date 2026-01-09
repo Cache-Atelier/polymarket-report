@@ -14,10 +14,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch from Polymarket Gamma API (server-side, no CORS issue)
-    // Fetch 500 events to get better coverage of high-movement markets
+    // Fetch from Polymarket's "biggest-movers" endpoint
+    // This is the same endpoint their Breaking page uses
     const response = await fetch(
-      'https://gamma-api.polymarket.com/events?active=true&closed=false&limit=500',
+      'https://polymarket.com/api/biggest-movers',
       {
         headers: {
           'Accept': 'application/json',
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // Return data to browser
+    // Return data to browser (data.markets contains the sorted markets)
     res.status(200).json(data);
 
   } catch (error) {
