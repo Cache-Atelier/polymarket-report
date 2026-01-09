@@ -208,7 +208,7 @@
       console.log('Top 10 biggest movers:');
       processed.slice(0, 10).forEach((m, i) => {
         const displayTitle = m.title.substring(0, 60);
-        const sign = market.oneDayPriceChange >= 0 ? '+' : '';
+        const sign = m.oneDayPriceChange >= 0 ? '+' : '';
         console.log(`${i + 1}. ${displayTitle}... (${sign}${(m.oneDayPriceChange * 100).toFixed(1)}%)`);
       });
 
