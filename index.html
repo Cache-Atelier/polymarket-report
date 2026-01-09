@@ -198,7 +198,7 @@
       const processed = markets.map(market => ({
         title: market.question || market.title || 'Unknown Market',
         question: market.question || market.title || 'Unknown Market',
-        slug: market.slug,
+        slug: market.events && market.events[0] ? market.events[0].slug : market.slug, // Use event slug
         oneDayPriceChange: market.oneDayPriceChange,
         priceChangePercent: calculatePriceChange(market)
       }));
