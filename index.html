@@ -63,10 +63,16 @@
       display: flex;
       flex-direction: column;
       gap: 18px;
+      border-right: 1px solid #000000;
+      padding-right: 30px;
+    }
+
+    .column:last-child {
+      border-right: none;
     }
 
     .headline {
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: 'Courier New', Courier, monospace;
       font-size: 15px;
       text-decoration: underline;
       color: #000000;
@@ -136,19 +142,9 @@
     // ============================================
     // TUNABLE CONFIGURATION - Adjust these values
     // ============================================
-    const RANKING_WEIGHTS = {
-      priceChange: 0.60,    // Primary signal: 24hr price movement (60%)
-      volume: 0.30,         // Secondary signal: Trading volume (30%)
-      tradeCount: 0.10      // Tertiary signal: Number of trades (10%)
-    };
-
     const TOTAL_MARKETS = 28;        // 1 main story + 27 in columns
-    const RED_HEADLINE_COUNT = 7;    // Top N markets get red treatment
-
-    // Normalization caps for scoring
-    const MAX_PRICE_CHANGE = 50;     // Cap price changes at 50%
-    const MAX_VOLUME = 1000000;      // Cap volume at $1M
-    const MAX_TRADE_COUNT = 10000;   // Cap trade count at 10k
+    const MIN_VOLUME = 10000;        // $10k minimum volume filter
+    const RED_THRESHOLD = 10;        // Markets with >10% movement show in red
 
     // ============================================
     // API FETCHING
@@ -215,35 +211,6 @@
       return Math.abs(change * 100);
     }
 
-    function approximateTradeCount(market) {
-      // Approximate trade count using volume / average trade price
-      const volume = market.volume24hr || 0;
-      const avgPrice = market.lastTradePrice || 0.5;
-      if (avgPrice === 0) return 0;
-      return volume / avgPrice;
-    }
-
-    function calculateMarketScore(market) {
-      // Extract metrics
-      const priceChange = calculatePriceChange(market);
-      const volume = market.volume24hr || 0;
-      const tradeCount = approximateTradeCount(market);
-
-      // Normalize each metric to 0-1 scale
-      const normalizedPrice = Math.min(priceChange / MAX_PRICE_CHANGE, 1);
-      const normalizedVolume = Math.min(volume / MAX_VOLUME, 1);
-      const normalizedTrades = Math.min(tradeCount / MAX_TRADE_COUNT, 1);
-
-      // Apply weights and calculate score
-      const score = (
-        normalizedPrice * RANKING_WEIGHTS.priceChange +
-        normalizedVolume * RANKING_WEIGHTS.volume +
-        normalizedTrades * RANKING_WEIGHTS.tradeCount
-      );
-
-      return score;
-    }
-
     function rankMarkets(events) {
       // Process events into market objects
       const processed = processEvents(events);
@@ -255,25 +222,33 @@
         return [];
       }
 
-      // Calculate scores
-      const scored = processed.map(market => ({
+      // Filter by minimum volume (avoid low-liquidity noise)
+      const filtered = processed.filter(m => m.volume24hr >= MIN_VOLUME);
+
+      console.log(`✓ Filtered to ${filtered.length} markets with volume >= $${MIN_VOLUME.toLocaleString()}`);
+
+      // Sort by absolute 24hr price change (pure "Breaking" algorithm)
+      filtered.sort((a, b) => {
+        const aChange = Math.abs(a.oneDayPriceChange);
+        const bChange = Math.abs(b.oneDayPriceChange);
+        return bChange - aChange;
+      });
+
+      // Attach price change percent for easy access
+      const withPercent = filtered.map(market => ({
         ...market,
-        score: calculateMarketScore(market),
         priceChangePercent: calculatePriceChange(market)
       }));
 
-      // Sort by score descending
-      scored.sort((a, b) => b.score - a.score);
-
       // Log top 10 for debugging
-      console.log('Top 10 ranked markets:');
-      scored.slice(0, 10).forEach((m, i) => {
+      console.log('Top 10 markets by 24hr movement:');
+      withPercent.slice(0, 10).forEach((m, i) => {
         const displayTitle = m.title.substring(0, 60);
-        console.log(`${i + 1}. ${displayTitle}... (score: ${m.score.toFixed(3)}, Δ: ${m.priceChangePercent.toFixed(1)}%)`);
+        console.log(`${i + 1}. ${displayTitle}... (Δ: ${m.priceChangePercent.toFixed(1)}%)`);
       });
 
       // Return top N markets
-      return scored.slice(0, TOTAL_MARKETS);
+      return withPercent.slice(0, TOTAL_MARKETS);
     }
 
     // ============================================
@@ -328,8 +303,8 @@
       const remainingMarkets = rankedMarkets.slice(1);
 
       remainingMarkets.forEach((market, index) => {
-        // Top RED_HEADLINE_COUNT - 1 (minus main story) get red treatment
-        const isRed = index < RED_HEADLINE_COUNT - 1;
+        // Markets with movement > RED_THRESHOLD get red treatment
+        const isRed = calculatePriceChange(market) > RED_THRESHOLD;
         const headline = formatHeadline(market);
 
         // Determine which column (round-robin distribution)
@@ -359,7 +334,7 @@
     // ============================================
     async function init() {
       console.log('🚀 Initializing Polymarket Report...');
-      console.log('Ranking weights:', RANKING_WEIGHTS);
+      console.log(`Configuration: ${TOTAL_MARKETS} markets, $${MIN_VOLUME.toLocaleString()} min volume, ${RED_THRESHOLD}% red threshold`);
 
       const markets = await fetchMarkets();
 
