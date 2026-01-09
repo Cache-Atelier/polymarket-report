@@ -15,8 +15,9 @@ export default async function handler(req, res) {
 
   try {
     // Fetch from Polymarket Gamma API (server-side, no CORS issue)
+    // Fetch 500 events to get better coverage of high-movement markets
     const response = await fetch(
-      'https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100',
+      'https://gamma-api.polymarket.com/events?active=true&closed=false&limit=500',
       {
         headers: {
           'Accept': 'application/json',
