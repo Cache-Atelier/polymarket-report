@@ -144,7 +144,6 @@
     // ============================================
     const TOTAL_MARKETS = 28;        // 1 main story + 27 in columns
     const MIN_VOLUME = 0;            // No volume filter (matches Polymarket Breaking)
-    const RED_THRESHOLD = 10;        // Markets with >10% movement show in red
 
     // ============================================
     // API FETCHING
@@ -268,8 +267,6 @@
       const remainingMarkets = rankedMarkets.slice(1);
 
       remainingMarkets.forEach((market, index) => {
-        // Markets with movement > RED_THRESHOLD get red treatment
-        const isRed = calculatePriceChange(market) > RED_THRESHOLD;
         const headline = formatHeadline(market);
 
         // Determine which column (round-robin distribution)
@@ -279,7 +276,7 @@
         const headlineLink = document.createElement('a');
         headlineLink.href = headline.url;
         headlineLink.target = '_blank';
-        headlineLink.className = `headline ${isRed ? 'red' : ''}`;
+        headlineLink.className = 'headline';
         headlineLink.textContent = headline.text;
 
         // Append to appropriate column
