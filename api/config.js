@@ -29,11 +29,11 @@ export const AI_PROVIDERS = [
 // MARKET FETCHING
 // ============================================
 export const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
-export const GAMMA_FETCH_LIMIT = 200;      // Fetch aggressively — most will be filtered as noise
 export const WHALE_TRADE_THRESHOLD = 10000; // USD minimum for whale trade detection
 export const WHALE_LOOKBACK_MINUTES = 120;  // How far back to scan for whale trades
 
-// Tags to fetch from directly (bypasses the noise-dominated "biggest movers" feed)
+// Tags to fetch from directly — this is the PRIMARY content filter.
+// Only markets tagged with these categories are fetched from the Gamma API.
 export const INTERESTING_TAGS = ['Politics', 'Elections', 'Science', 'AI', 'World', 'Economy'];
 
 // ============================================
