@@ -40,6 +40,13 @@
       line-height: 1.3;
     }
 
+    #main-story .whale-tag {
+      font-size: 11px;
+      color: #CC0000;
+      font-family: 'Courier New', monospace;
+      margin-top: 4px;
+    }
+
     #logo {
       text-align: center;
       font-family: Arial, Helvetica, sans-serif;
@@ -91,6 +98,14 @@
       font-weight: bold;
     }
 
+    .whale-tag {
+      font-size: 10px;
+      color: #CC0000;
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
     #error-message {
       text-align: center;
       font-family: Arial, Helvetica, sans-serif;
@@ -139,31 +154,15 @@
   <div id="error-message"></div>
 
   <script>
-    // ============================================
-    // TUNABLE CONFIGURATION - Adjust these values
-    // ============================================
-    const TOTAL_MARKETS = 28;        // 1 main story + 27 in columns
-    const MIN_VOLUME = 0;            // No volume filter (matches Polymarket Breaking)
+    const TOTAL_MARKETS = 28;
 
-    // ============================================
-    // API FETCHING
-    // ============================================
     async function fetchMarkets() {
       try {
-        // Fetch from our Vercel serverless function (bypasses CORS)
-        // This proxies Polymarket's /api/biggest-movers endpoint
         const response = await fetch('/api/markets');
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-
-        // Data structure: {markets: [...]}
-        const markets = data.markets || [];
-        console.log(`✓ Fetched ${markets.length} biggest movers from Polymarket`);
-        return markets;
+        console.log(`Fetched ${data.markets?.length} markets (AI: ${data.meta?.aiProvider})`);
+        return data.markets || [];
       } catch (error) {
         console.error('Failed to fetch markets:', error);
         showError('Error loading markets. Please refresh the page.');
@@ -171,119 +170,82 @@
       }
     }
 
-    // ============================================
-    // DATA PROCESSING
-    // ============================================
-    function calculatePriceChange(market) {
-      // oneDayPriceChange is in decimal format: -0.0115 = -1.15%
-      const change = market.oneDayPriceChange;
-      if (change === null || change === undefined) return 0;
-
-      // Use absolute value - both big increases AND decreases are newsworthy
-      return Math.abs(change * 100);
-    }
-
-    function processMarkets(markets) {
-      // Markets from biggest-movers are already sorted by movement
-      // Just need to prepare them for rendering
-
-      console.log(`✓ Processing ${markets.length} markets`);
-
-      if (markets.length === 0) {
-        console.error('No markets available!');
-        return [];
+    function formatHeadline(market) {
+      // Use AI headline if available, otherwise fall back to question + price change
+      let text;
+      if (market.headline) {
+        text = market.headline;
+      } else {
+        const rawChange = market.oneDayPriceChange * 100;
+        const arrow = rawChange >= 0 ? '\u2191' : '\u2193';
+        const changeText = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
+        text = `${market.question} [${changeText}]`;
       }
 
-      // Attach price change percent and prepare data
-      const processed = markets.map(market => ({
-        title: market.question || market.title || 'Unknown Market',
-        question: market.question || market.title || 'Unknown Market',
-        slug: market.events && market.events[0] ? market.events[0].slug : market.slug, // Use event slug
-        oneDayPriceChange: market.oneDayPriceChange,
-        priceChangePercent: calculatePriceChange(market)
-      }));
-
-      // Log top 10 for debugging
-      console.log('Top 10 biggest movers:');
-      processed.slice(0, 10).forEach((m, i) => {
-        const displayTitle = m.title.substring(0, 60);
-        const sign = m.oneDayPriceChange >= 0 ? '+' : '';
-        console.log(`${i + 1}. ${displayTitle}... (${sign}${(m.oneDayPriceChange * 100).toFixed(1)}%)`);
-      });
-
-      // Return top N markets (or all if less than N)
-      return processed.slice(0, TOTAL_MARKETS);
-    }
-
-    // ============================================
-    // DOM RENDERING
-    // ============================================
-    function formatHeadline(market) {
-      // Calculate price change with arrow
-      const rawChange = market.oneDayPriceChange * 100;
-      const arrow = rawChange >= 0 ? '↑' : '↓';
-      const changeText = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
-
-      // Use title field (API uses "title" not "question" at top level)
-      const headline = market.title || market.question || 'Unknown Market';
-
-      // Format: "Market Question [↑12.5%]"
       return {
-        text: `${headline} [${changeText}]`,
-        url: `https://polymarket.com/event/${market.slug}`,
-        market: market
+        text,
+        url: `https://polymarket.com/event/${market.eventSlug || market.slug}`,
+        isRed: market.isRed,
+        whaleSignal: market.whaleSignal,
       };
     }
 
-    function renderMarkets(rankedMarkets) {
-      if (rankedMarkets.length === 0) {
+    function renderMarkets(markets) {
+      if (markets.length === 0) {
         showError('No markets available. Please try again later.');
         return;
       }
 
-      // Hide loading message
       document.getElementById('loading').style.display = 'none';
-
-      // Show logo
       document.getElementById('logo').style.display = 'block';
 
-      // Render main story (index 0)
-      const mainStory = formatHeadline(rankedMarkets[0]);
+      // Main story (index 0) — always red, largest headline
+      const mainStory = formatHeadline(markets[0]);
       const mainStoryEl = document.getElementById('main-story');
-      const mainStoryLink = document.createElement('a');
-      mainStoryLink.href = mainStory.url;
-      mainStoryLink.target = '_blank';
-      mainStoryLink.textContent = mainStory.text;
-      mainStoryEl.appendChild(mainStoryLink);
+      const mainLink = document.createElement('a');
+      mainLink.href = mainStory.url;
+      mainLink.target = '_blank';
+      mainLink.textContent = mainStory.text;
+      mainStoryEl.appendChild(mainLink);
 
-      // Get column elements
+      if (mainStory.whaleSignal) {
+        const tag = document.createElement('div');
+        tag.className = 'whale-tag';
+        tag.textContent = 'WHALE ALERT';
+        mainStoryEl.appendChild(tag);
+      }
+
+      // Distribute remaining markets across 3 columns
       const columns = [
         document.getElementById('column-1'),
         document.getElementById('column-2'),
-        document.getElementById('column-3')
+        document.getElementById('column-3'),
       ];
 
-      // Distribute remaining markets across 3 columns
-      const remainingMarkets = rankedMarkets.slice(1);
-
-      remainingMarkets.forEach((market, index) => {
+      markets.slice(1, TOTAL_MARKETS).forEach((market, index) => {
         const headline = formatHeadline(market);
+        const colIdx = index % 3;
 
-        // Determine which column (round-robin distribution)
-        const columnIndex = index % 3;
+        const container = document.createElement('div');
 
-        // Create headline element
-        const headlineLink = document.createElement('a');
-        headlineLink.href = headline.url;
-        headlineLink.target = '_blank';
-        headlineLink.className = 'headline';
-        headlineLink.textContent = headline.text;
+        const link = document.createElement('a');
+        link.href = headline.url;
+        link.target = '_blank';
+        link.className = 'headline' + (headline.isRed ? ' red' : '');
+        link.textContent = headline.text;
+        container.appendChild(link);
 
-        // Append to appropriate column
-        columns[columnIndex].appendChild(headlineLink);
+        if (headline.whaleSignal) {
+          const tag = document.createElement('div');
+          tag.className = 'whale-tag';
+          tag.textContent = 'WHALE ALERT';
+          container.appendChild(tag);
+        }
+
+        columns[colIdx].appendChild(container);
       });
 
-      console.log(`✓ Rendered ${rankedMarkets.length} markets to page`);
+      console.log(`Rendered ${Math.min(markets.length, TOTAL_MARKETS)} markets`);
     }
 
     function showError(message) {
@@ -291,31 +253,12 @@
       document.getElementById('error-message').textContent = message;
     }
 
-    // ============================================
-    // APPLICATION INITIALIZATION
-    // ============================================
     async function init() {
-      console.log('🚀 Initializing Polymarket Report...');
-      console.log(`Configuration: ${TOTAL_MARKETS} markets max`);
-
       const markets = await fetchMarkets();
-
-      if (markets.length === 0) {
-        return; // Error already displayed
-      }
-
-      const processed = processMarkets(markets);
-
-      if (processed.length < TOTAL_MARKETS) {
-        console.log(`ℹ Showing ${processed.length} markets (Polymarket provides ${markets.length} biggest movers)`);
-      }
-
-      renderMarkets(processed);
-
-      console.log('✓ Polymarket Report loaded successfully');
+      if (markets.length === 0) return;
+      renderMarkets(markets);
     }
 
-    // Run on page load
     window.addEventListener('DOMContentLoaded', init);
   </script>
 </body>
