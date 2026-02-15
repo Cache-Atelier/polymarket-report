@@ -29,7 +29,7 @@ export const AI_PROVIDERS = [
 // MARKET FETCHING
 // ============================================
 export const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
-export const GAMMA_FETCH_LIMIT = 40;       // Fetch more than needed, filter down
+export const GAMMA_FETCH_LIMIT = 80;       // Fetch extra to compensate for noise filtering
 export const WHALE_TRADE_THRESHOLD = 10000; // USD minimum for whale trade detection
 export const WHALE_LOOKBACK_MINUTES = 120;  // How far back to scan for whale trades
 
@@ -47,15 +47,54 @@ export const WEIGHTS = {
 // RED HEADLINE THRESHOLDS
 // ============================================
 export const RED_THRESHOLDS = {
-  priceChangePct: 10,   // abs(24h change) >= 10% → red
-  whaleDetected: true,  // Any whale contrarian bet → red
-  topPercentile: 0.20,  // Top 20% by composite score → red
+  priceChangePct: 25,    // abs(24h change) >= 25% → red (truly dramatic moves only)
+  topPercentile: 0.12,   // Top ~12% by composite score → red (~3 of 28)
 };
 
 // ============================================
 // CACHING
 // ============================================
 export const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// ============================================
+// NOISE MARKET FILTERS
+// Markets matching these patterns are excluded from display.
+// Goal: surface politics, geopolitics, policy, economics, AI, and
+// significant world events — NOT crypto prices, sports, weather, tweets.
+// ============================================
+export const NOISE_PATTERNS = [
+  // Crypto price/trading markets (keeps policy, regulation, ETF, adoption)
+  /\b(bitcoin|btc|ethereum|eth|solana|sol|doge|dogecoin|xrp|bnb|cardano|avax|matic|polkadot|shib|pepe|memecoin|altcoin|litecoin|toncoin|chainlink)\b.*\b(price|above|below|reach|hit|close|end at|trade at|worth|all.time.high|ath)\b/i,
+  /\bprice of\b.*\b(bitcoin|btc|eth|ethereum|sol|solana|crypto|token|coin)\b/i,
+  /\bcrypto\b.*\b(price|above|below|market cap)\b/i,
+  /\b(btc|eth|sol|bitcoin|ethereum|solana)\b.*\$[\d,]+/i,
+
+  // Weather/climate daily predictions
+  /\b(temperature|snowfall|rainfall|inches of (rain|snow)|high of \d|low of \d|degrees? (fahrenheit|celsius|f\b|c\b))\b/i,
+
+  // Sports — leagues
+  /\b(nfl|nba|mlb|nhl|mls|ncaa|wnba|ufc|wwe|pga|atp|wta|nascar|f1|formula (1|one)|premier league|champions league|la liga|serie a|bundesliga|ligue 1|eredivisie|cricket|ipl|afl)\b/i,
+  // Sports — major events
+  /\b(super bowl|world series|stanley cup|march madness|world cup|euro 20\d\d|olympics|grand slam|grand prix)\b/i,
+  // Sports — outcome language
+  /\b(win (the |their )?(game|match|series|title|championship|ring|trophy|pennant))\b/i,
+  /\b(playoff|postseason|regular season|preseason|draft pick|mvp award|ballon d.or)\b/i,
+
+  // Esports
+  /\besports?\b/i,
+  /\b(league of legends|dota|counter-?strike|cs ?2|valorant|overwatch|fortnite)\b/i,
+
+  // Tweet/social media activity
+  /\btweet(s|ed)?\b/i,
+  /\bretweet\b/i,
+  /\bpost(s|ed)? on (x|twitter)\b/i,
+  /\b(x|twitter) (post|follower)/i,
+  /\bfollowers? (on|count)\b/i,
+
+  // YouTube/streaming/subscriber metrics
+  /\b(youtube|twitch|tiktok)\b.*\b(views|subscribers|followers|likes)\b/i,
+  /\bsubscribers?\b.*\b(youtube|channel)\b/i,
+];
 
 // ============================================
 // AI HEADLINE PROMPT

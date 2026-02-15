@@ -12,6 +12,7 @@ import {
   WEIGHTS,
   RED_THRESHOLDS,
   CACHE_TTL_MS,
+  NOISE_PATTERNS,
   HEADLINE_SYSTEM_PROMPT,
   buildHeadlineUserPrompt,
 } from './config.js';
@@ -91,6 +92,14 @@ async function fetchWhaleTrades() {
 }
 
 // ============================================
+// NOISE FILTER — Exclude crypto prices, sports, weather, tweets, etc.
+// ============================================
+function isNoiseMarket(market) {
+  const question = market.question || market.title || '';
+  return NOISE_PATTERNS.some(pattern => pattern.test(question));
+}
+
+// ============================================
 // MERGE & RANK — Combine all feeds into one ranked list
 // ============================================
 function mergeAndRank(movers, volumeLeaders, whaleTrades) {
@@ -132,6 +141,18 @@ function mergeAndRank(movers, volumeLeaders, whaleTrades) {
         _absPriceChange: Math.abs(m.oneDayPriceChange || 0),
       });
     }
+  }
+
+  // Filter out noise markets (crypto prices, sports, weather, tweets, etc.)
+  let noiseCount = 0;
+  for (const [id, m] of marketMap) {
+    if (isNoiseMarket(m)) {
+      marketMap.delete(id);
+      noiseCount++;
+    }
+  }
+  if (noiseCount > 0) {
+    console.log(`Filtered out ${noiseCount} noise markets, ${marketMap.size} remaining`);
   }
 
   // Compute normalization factors
@@ -181,7 +202,6 @@ function mergeAndRank(movers, volumeLeaders, whaleTrades) {
   return displayed.map(m => {
     const absPct = Math.abs((m.oneDayPriceChange || 0) * 100);
     const isRed = absPct >= RED_THRESHOLDS.priceChangePct
-               || !!m._whaleInfo
                || m._score >= scoreThreshold;
 
     // Best YES price: outcomePrices is typically a JSON string "[0.55, 0.45]"
