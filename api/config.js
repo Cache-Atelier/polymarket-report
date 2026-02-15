@@ -32,9 +32,42 @@ export const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
 export const WHALE_TRADE_THRESHOLD = 10000; // USD minimum for whale trade detection
 export const WHALE_LOOKBACK_MINUTES = 120;  // How far back to scan for whale trades
 
-// Tags to fetch from directly — this is the PRIMARY content filter.
-// Only markets tagged with these categories are fetched from the Gamma API.
-export const INTERESTING_TAGS = ['Politics', 'Elections', 'Science', 'AI', 'World', 'Economy'];
+// --- TAG-BASED CONTENT CURATION ---
+// We use THREE complementary fetch strategies and merge the results:
+//
+// 1. FEATURED EVENTS: Polymarket's own editorial picks (featured=true)
+// 2. TOP-LEVEL TAG IDs: Broad categories with known numeric IDs
+// 3. SUB-TAG SLUGS: Specific sub-topics cherry-picked for news value
+//
+// This is the PRIMARY content filter. If it's not in these lists, it doesn't
+// appear on the site. The noise regex is just a lightweight safety net.
+
+// Top-level categories by tag_id (confirmed from Polymarket frontend source)
+// We ONLY include news-worthy categories — Sports (100639), Crypto (21),
+// and Culture (596) are intentionally excluded.
+export const TAG_IDS = [
+  { id: 2,      label: 'Politics' },
+  { id: 100265, label: 'Geopolitics' },
+  { id: 1401,   label: 'Tech' },
+  // Finance (120) excluded at top-level — too much price speculation.
+  // We cherry-pick newsworthy finance sub-tags below instead.
+];
+
+// Specific sub-tags by slug, curated for news signal.
+// These drill into topics that the broad tag_ids might miss,
+// and let us grab finance/economy news without the price noise.
+export const TAG_SLUGS = [
+  // Politics & Law
+  'elections', 'us-elections', 'global-elections', 'congress', 'courts', 'scotus',
+  // Geopolitics & World
+  'world', 'ukraine', 'middle-east', 'china', 'iran', 'israel',
+  // Economy & Policy (NOT price speculation)
+  'economy', 'economic-policy', 'fed', 'tariffs', 'trade-war', 'business',
+  // Science & Space
+  'science', 'space',
+  // AI (dedicated sub-tag, more specific than broad Tech)
+  'ai',
+];
 
 // ============================================
 // RANKING WEIGHTS
