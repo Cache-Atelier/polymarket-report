@@ -7,6 +7,7 @@ import {
   AI_PROVIDERS,
   TOTAL_MARKETS,
   GAMMA_FETCH_LIMIT,
+  INTERESTING_TAGS,
   WHALE_TRADE_THRESHOLD,
   WHALE_LOOKBACK_MINUTES,
   WEIGHTS,
@@ -92,17 +93,44 @@ async function fetchWhaleTrades() {
 }
 
 // ============================================
+// GAMMA API — Fetch by interesting tags (Politics, AI, etc.)
+// This bypasses the noise-dominated "biggest movers" feed
+// ============================================
+async function fetchByTags() {
+  const fetches = INTERESTING_TAGS.map(async (tag) => {
+    try {
+      const res = await fetch(
+        `${GAMMA_API}/markets?active=true&closed=false&tag=${encodeURIComponent(tag)}&order=volume24hr&ascending=false&limit=40`
+      );
+      if (!res.ok) return [];
+      return res.json();
+    } catch {
+      return [];
+    }
+  });
+
+  const results = await Promise.all(fetches);
+  const all = results.flat();
+  console.log(`Tag-based fetch: ${all.length} markets from ${INTERESTING_TAGS.length} tags (${INTERESTING_TAGS.join(', ')})`);
+  return all;
+}
+
+// ============================================
 // NOISE FILTER — Exclude crypto prices, sports, weather, tweets, etc.
 // ============================================
 function isNoiseMarket(market) {
   const question = market.question || market.title || '';
-  return NOISE_PATTERNS.some(pattern => pattern.test(question));
+  const matched = NOISE_PATTERNS.some(pattern => pattern.test(question));
+  if (matched) {
+    console.log(`  FILTERED: "${question.substring(0, 80)}"`);
+  }
+  return matched;
 }
 
 // ============================================
 // MERGE & RANK — Combine all feeds into one ranked list
 // ============================================
-function mergeAndRank(movers, volumeLeaders, whaleTrades) {
+function mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades) {
   // Build whale trade index: marketId → { count, totalUsd, largestSide, contrarian }
   const whaleIndex = {};
   for (const trade of whaleTrades) {
@@ -143,17 +171,30 @@ function mergeAndRank(movers, volumeLeaders, whaleTrades) {
     }
   }
 
+  // Merge tag-fetched markets (these already passed tag filter, so are likely relevant)
+  for (const m of tagMarkets) {
+    const id = m.id || m.conditionId;
+    if (marketMap.has(id)) {
+      marketMap.get(id)._sources.push('tags');
+    } else if (m.oneDayPriceChange != null) {
+      marketMap.set(id, {
+        ...m,
+        _sources: ['tags'],
+        _absPriceChange: Math.abs(m.oneDayPriceChange || 0),
+      });
+    }
+  }
+
   // Filter out noise markets (crypto prices, sports, weather, tweets, etc.)
   let noiseCount = 0;
+  console.log(`Pre-filter: ${marketMap.size} unique markets`);
   for (const [id, m] of marketMap) {
     if (isNoiseMarket(m)) {
       marketMap.delete(id);
       noiseCount++;
     }
   }
-  if (noiseCount > 0) {
-    console.log(`Filtered out ${noiseCount} noise markets, ${marketMap.size} remaining`);
-  }
+  console.log(`Filtered out ${noiseCount} noise markets, ${marketMap.size} remaining`);
 
   // Compute normalization factors
   const allMarkets = Array.from(marketMap.values());
@@ -176,9 +217,14 @@ function mergeAndRank(movers, volumeLeaders, whaleTrades) {
              + (whaleSignal * WEIGHTS.whale)
              + (newTrendingSignal * WEIGHTS.newTrending);
 
-    // Multi-source boost: appearing in both movers AND volume is extra signal
+    // Multi-source boost: appearing in multiple feeds is extra signal
     if (m._sources.length > 1) {
       m._score *= 1.15;
+    }
+
+    // Tag relevance boost: markets from curated tags are more likely to be interesting
+    if (m._sources.includes('tags')) {
+      m._score *= 1.10;
     }
 
     // Attach whale info for headline generation
@@ -194,15 +240,22 @@ function mergeAndRank(movers, volumeLeaders, whaleTrades) {
 
   // Determine red headline threshold (top percentile of those we'll show)
   const displayed = allMarkets.slice(0, TOTAL_MARKETS);
+  const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
   const scoreThreshold = displayed.length > 0
-    ? displayed[Math.floor(displayed.length * RED_THRESHOLDS.topPercentile)]._score
+    ? displayed[redCount]._score
     : 0;
+
+  // Log what survived filtering for debugging
+  console.log(`Red threshold: top ${redCount} of ${displayed.length} (score >= ${scoreThreshold.toFixed(3)})`);
+  displayed.slice(0, 5).forEach((m, i) => {
+    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${(m.question || '').substring(0, 60)}" (sources: ${m._sources.join(',')})`);
+  });
 
   // Prepare output
   return displayed.map(m => {
-    const absPct = Math.abs((m.oneDayPriceChange || 0) * 100);
-    const isRed = absPct >= RED_THRESHOLDS.priceChangePct
-               || m._score >= scoreThreshold;
+    // Only top-scoring markets get red — NOT based on price change %
+    // (biggest movers almost always exceed any % threshold, making everything red)
+    const isRed = m._score >= scoreThreshold;
 
     // Best YES price: outcomePrices is typically a JSON string "[0.55, 0.45]"
     let bestYesPrice = 0.5;
@@ -345,16 +398,17 @@ export default async function handler(req, res) {
     console.log('Cache miss — fetching fresh data');
 
     // Fetch all data sources in parallel
-    const [movers, volumeLeaders, whaleTrades] = await Promise.all([
+    const [movers, volumeLeaders, tagMarkets, whaleTrades] = await Promise.all([
       fetchBiggestMovers(),
       fetchVolumeLeaders(),
+      fetchByTags(),
       fetchWhaleTrades(),
     ]);
 
-    console.log(`Fetched: ${movers.length} movers, ${volumeLeaders.length} volume leaders, ${whaleTrades.length} whale trades`);
+    console.log(`Fetched: ${movers.length} movers, ${volumeLeaders.length} volume leaders, ${tagMarkets.length} tag markets, ${whaleTrades.length} whale trades`);
 
     // Merge and rank
-    const ranked = mergeAndRank(movers, volumeLeaders, whaleTrades);
+    const ranked = mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades);
     console.log(`Ranked: ${ranked.length} markets for display`);
 
     // Generate AI headlines
@@ -373,6 +427,7 @@ export default async function handler(req, res) {
         sources: {
           movers: movers.length,
           volumeLeaders: volumeLeaders.length,
+          tagMarkets: tagMarkets.length,
           whaleTrades: whaleTrades.length,
         },
         aiProvider: headlines ? 'active' : 'fallback',
