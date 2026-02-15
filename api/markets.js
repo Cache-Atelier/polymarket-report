@@ -1,5 +1,5 @@
 // Vercel Serverless Function — Polymarket Report data pipeline
-// Fetches from Gamma API by tag, ranks, generates AI headlines, caches
+// Fetches from Gamma API using tag_id + featured events, ranks, generates AI headlines
 
 import {
   GAMMA_API,
@@ -19,9 +19,43 @@ import {
 } from './config.js';
 
 // ============================================
-// IN-MEMORY CACHE (persists across warm invocations)
+// IN-MEMORY CACHES (persist across warm invocations)
 // ============================================
 let cache = { data: null, timestamp: 0 };
+let slugIdCache = null; // slug → tag_id mapping, resolved once per cold start
+
+// ============================================
+// SLUG → TAG_ID RESOLVER
+// The /markets?tag=slug endpoint is broken (returns unfiltered results
+// regardless of slug). The /markets?tag_id=N endpoint works correctly.
+// So we resolve our curated slugs to numeric IDs via /tags/slug/{slug},
+// then fetch markets using tag_id.
+// ============================================
+async function resolveTagSlugs() {
+  if (slugIdCache) return slugIdCache;
+
+  const results = await Promise.all(
+    TAG_SLUGS.map(async (slug) => {
+      try {
+        const res = await fetch(`${GAMMA_API}/tags/slug/${slug}`);
+        if (!res.ok) {
+          console.log(`  slug "${slug}": ${res.status} (not found)`);
+          return null;
+        }
+        const tag = await res.json();
+        return { slug, id: tag.id, label: tag.label };
+      } catch (err) {
+        console.log(`  slug "${slug}": error (${err.message})`);
+        return null;
+      }
+    })
+  );
+
+  slugIdCache = results.filter(Boolean);
+  console.log(`Resolved ${slugIdCache.length}/${TAG_SLUGS.length} tag slugs to IDs`);
+  slugIdCache.forEach(t => console.log(`  ${t.slug} → ${t.id} (${t.label})`));
+  return slugIdCache;
+}
 
 // ============================================
 // STRATEGY 1: Featured events (Polymarket's editorial picks)
@@ -32,20 +66,20 @@ async function fetchFeaturedEvents() {
       `${GAMMA_API}/events?featured=true&active=true&closed=false&limit=30`
     );
     if (!res.ok) {
-      console.log(`  Featured events: ${res.status} (not supported or empty)`);
+      console.log(`  Featured events: ${res.status}`);
       return [];
     }
     const events = await res.json();
-    // Events contain nested markets — extract them
+    // Extract nested markets from events
     const markets = [];
     for (const evt of events) {
       if (evt.markets && Array.isArray(evt.markets)) {
         for (const m of evt.markets) {
-          markets.push({ ...m, _source: 'featured' });
+          markets.push({ ...m, _isFeatured: true });
         }
       }
     }
-    console.log(`  Featured events: ${events.length} events → ${markets.length} markets`);
+    console.log(`  Featured: ${events.length} events → ${markets.length} markets`);
     return markets;
   } catch (err) {
     console.log(`  Featured events: error (${err.message})`);
@@ -54,84 +88,26 @@ async function fetchFeaturedEvents() {
 }
 
 // ============================================
-// STRATEGY 2: Top-level tag_id categories (numeric IDs)
+// STRATEGY 2: Markets by tag_id (works correctly, unlike tag=slug)
 // ============================================
-async function fetchByTagIds() {
-  const fetches = TAG_IDS.map(async ({ id, label }) => {
-    try {
-      // Try events endpoint with tag_id (returns events with nested markets)
-      const res = await fetch(
-        `${GAMMA_API}/events?tag_id=${id}&active=true&closed=false&order=volume24hr&ascending=false&limit=20`
-      );
-      if (!res.ok) {
-        console.log(`  tag_id ${id} (${label}): events ${res.status}, trying markets...`);
-        // Fallback: try markets endpoint with tag_id
-        const res2 = await fetch(
-          `${GAMMA_API}/markets?tag_id=${id}&active=true&closed=false&order=volume24hr&ascending=false&limit=50`
-        );
-        if (!res2.ok) return [];
-        const markets = await res2.json();
-        console.log(`  tag_id ${id} (${label}): ${markets.length} markets (via /markets)`);
-        return markets;
-      }
-      const events = await res.json();
-      const markets = [];
-      for (const evt of events) {
-        if (evt.markets && Array.isArray(evt.markets)) {
-          for (const m of evt.markets) markets.push(m);
-        }
-      }
-      console.log(`  tag_id ${id} (${label}): ${events.length} events → ${markets.length} markets`);
-      return markets;
-    } catch (err) {
-      console.log(`  tag_id ${id} (${label}): error (${err.message})`);
+async function fetchMarketsByTagId(id, label, limit = 50) {
+  try {
+    const res = await fetch(
+      `${GAMMA_API}/markets?tag_id=${id}&active=true&closed=false&order=volume24hr&ascending=false&limit=${limit}`
+    );
+    if (!res.ok) {
+      console.log(`  tag_id ${id} (${label}): ${res.status}`);
       return [];
     }
-  });
-  return (await Promise.all(fetches)).flat();
-}
-
-// ============================================
-// STRATEGY 3: Sub-tag slugs (curated specific topics)
-// ============================================
-async function fetchByTagSlugs() {
-  const fetches = TAG_SLUGS.map(async (slug) => {
-    try {
-      const res = await fetch(
-        `${GAMMA_API}/markets?active=true&closed=false&tag=${encodeURIComponent(slug)}&order=volume24hr&ascending=false&limit=30`
-      );
-      if (!res.ok) return [];
-      const markets = await res.json();
-      if (markets.length > 0) {
-        console.log(`  tag "${slug}": ${markets.length} markets`);
-      }
-      return markets;
-    } catch {
-      return [];
+    const markets = await res.json();
+    if (markets.length > 0) {
+      console.log(`  tag_id ${id} (${label}): ${markets.length} markets`);
     }
-  });
-  return (await Promise.all(fetches)).flat();
-}
-
-// ============================================
-// COMBINED FETCH: Run all three strategies in parallel, merge results
-// ============================================
-async function fetchAllMarkets() {
-  console.log('Fetching markets via 3 strategies...');
-  const [featured, tagIdMarkets, tagSlugMarkets] = await Promise.all([
-    fetchFeaturedEvents(),
-    fetchByTagIds(),
-    fetchByTagSlugs(),
-  ]);
-  console.log(`Strategy totals: ${featured.length} featured, ${tagIdMarkets.length} tag_id, ${tagSlugMarkets.length} tag_slug`);
-
-  // Merge all, marking featured markets for score boost
-  const all = [
-    ...featured.map(m => ({ ...m, _isFeatured: true })),
-    ...tagIdMarkets,
-    ...tagSlugMarkets,
-  ];
-  return all;
+    return markets;
+  } catch (err) {
+    console.log(`  tag_id ${id} (${label}): error (${err.message})`);
+    return [];
+  }
 }
 
 // ============================================
@@ -147,8 +123,6 @@ async function fetchWhaleTrades() {
       return [];
     }
     const trades = await res.json();
-
-    // Filter to recent trades only
     const cutoff = Date.now() - WHALE_LOOKBACK_MINUTES * 60 * 1000;
     return (trades || []).filter(t => {
       const ts = new Date(t.timestamp || t.created_at || t.createdAt).getTime();
@@ -161,7 +135,32 @@ async function fetchWhaleTrades() {
 }
 
 // ============================================
-// NOISE FILTER — Safety net for anything that slips through tags
+// COMBINED FETCH: resolve slugs, then fetch all in parallel
+// ============================================
+async function fetchAllMarkets() {
+  console.log('Phase 1: Resolving tag slugs to IDs...');
+  const resolvedTags = await resolveTagSlugs();
+
+  // Build full list of tag_ids: top-level + resolved sub-tags
+  const allTagIds = [
+    ...TAG_IDS.map(t => ({ ...t, limit: 50 })),
+    ...resolvedTags.map(t => ({ id: t.id, label: `${t.label} [${t.slug}]`, limit: 30 })),
+  ];
+
+  console.log(`Phase 2: Fetching from ${allTagIds.length} tag_ids + featured events...`);
+  const [featured, ...tagResults] = await Promise.all([
+    fetchFeaturedEvents(),
+    ...allTagIds.map(t => fetchMarketsByTagId(t.id, t.label, t.limit)),
+  ]);
+
+  const tagMarkets = tagResults.flat();
+  console.log(`Strategy totals: ${featured.length} featured, ${tagMarkets.length} from tag_ids`);
+
+  return [...featured, ...tagMarkets];
+}
+
+// ============================================
+// NOISE FILTER — Lightweight safety net
 // ============================================
 function isNoiseMarket(market) {
   const question = market.question || market.title || '';
@@ -185,7 +184,7 @@ function rankMarkets(allMarkets, whaleTrades) {
     whaleIndex[mid].sides.push(trade.side || trade.outcome);
   }
 
-  // Deduplicate by market ID (same market can appear from multiple strategies/tags)
+  // Deduplicate by market ID
   const marketMap = new Map();
   for (const m of allMarkets) {
     const id = m.id || m.conditionId;
@@ -197,12 +196,11 @@ function rankMarkets(allMarkets, whaleTrades) {
         _isFeatured: !!m._isFeatured,
       });
     } else if (m._isFeatured) {
-      // If we've seen this market before but now it's featured, mark it
       marketMap.get(id)._isFeatured = true;
     }
   }
 
-  // Safety net: filter any noise that slipped through tags
+  // Safety net noise filter
   let noiseCount = 0;
   for (const [id, m] of marketMap) {
     if (isNoiseMarket(m)) {
@@ -212,11 +210,11 @@ function rankMarkets(allMarkets, whaleTrades) {
   }
 
   const scorable = Array.from(marketMap.values());
-  console.log(`${allMarkets.length} raw → ${scorable.length} unique markets (${noiseCount} noise filtered)`);
+  console.log(`${allMarkets.length} raw → ${scorable.length} unique (${noiseCount} noise filtered)`);
 
   if (scorable.length === 0) return [];
 
-  // Compute normalization factors
+  // Normalization
   const maxAbsChange = Math.max(...scorable.map(m => m._absPriceChange), 0.001);
   const maxVolume = Math.max(...scorable.map(m => m.volume24hr || 0), 1);
 
@@ -235,12 +233,11 @@ function rankMarkets(allMarkets, whaleTrades) {
              + (whaleSignal * WEIGHTS.whale)
              + (newTrendingSignal * WEIGHTS.newTrending);
 
-    // Featured boost: Polymarket's editorial picks get a significant boost
+    // Featured boost: Polymarket's editorial picks
     if (m._isFeatured) {
       m._score *= 1.25;
     }
 
-    // Attach whale info for headline generation
     if (whale) {
       const dominantSide = getMajoritySide(whale.sides);
       m._whaleInfo = whale;
@@ -253,15 +250,14 @@ function rankMarkets(allMarkets, whaleTrades) {
 
   const displayed = scorable.slice(0, TOTAL_MARKETS);
   const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
-  const scoreThreshold = displayed.length > 0
-    ? displayed[redCount]._score
-    : 0;
+  const scoreThreshold = displayed.length > 0 ? displayed[redCount]._score : 0;
 
-  // Log top markets for debugging
+  // Log top markets
   console.log(`Displaying ${displayed.length} markets (${redCount} red)`);
-  displayed.slice(0, 5).forEach((m, i) => {
+  displayed.slice(0, 8).forEach((m, i) => {
     const q = (m.question || '').substring(0, 70);
-    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${q}"`);
+    const feat = m._isFeatured ? ' [FEAT]' : '';
+    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${q}"${feat}`);
   });
 
   return displayed.map(m => {
@@ -358,7 +354,6 @@ async function generateHeadlines(markets) {
         continue;
       }
 
-      // Parse JSON array from response (handle markdown code fences)
       const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
       const headlines = JSON.parse(cleaned);
 
@@ -393,7 +388,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Check cache
     const now = Date.now();
     const ttl = parseInt(process.env.CACHE_TTL_MS) || CACHE_TTL_MS;
 
@@ -405,22 +399,19 @@ export default async function handler(req, res) {
 
     console.log('Cache miss — fetching fresh data');
 
-    // Fetch from all strategies + whale trades in parallel
-    const [allTagMarkets, whaleTrades] = await Promise.all([
+    // Fetch all markets + whale trades in parallel
+    const [allMarkets, whaleTrades] = await Promise.all([
       fetchAllMarkets(),
       fetchWhaleTrades(),
     ]);
 
-    console.log(`Total fetched: ${allTagMarkets.length} markets, ${whaleTrades.length} whale trades`);
+    console.log(`Total: ${allMarkets.length} markets, ${whaleTrades.length} whale trades`);
 
-    // Rank and select
-    const ranked = rankMarkets(allTagMarkets, whaleTrades);
+    const ranked = rankMarkets(allMarkets, whaleTrades);
     console.log(`Final: ${ranked.length} markets for display`);
 
-    // Generate AI headlines
     const headlines = await generateHeadlines(ranked);
 
-    // Attach headlines to markets
     const markets = ranked.map((m, i) => ({
       ...m,
       headline: headlines ? headlines[i] : null,
@@ -431,20 +422,17 @@ export default async function handler(req, res) {
       meta: {
         generated: new Date().toISOString(),
         tagIds: TAG_IDS.map(t => t.label),
-        tagSlugs: TAG_SLUGS,
-        sources: { totalMarkets: allTagMarkets.length, whaleTrades: whaleTrades.length },
+        resolvedSlugs: (slugIdCache || []).map(t => `${t.slug}→${t.id}`),
+        sources: { totalMarkets: allMarkets.length, whaleTrades: whaleTrades.length },
         aiProvider: headlines ? 'active' : 'fallback',
       },
     };
 
-    // Update cache
     cache = { data: result, timestamp: now };
-
     res.status(200).json(result);
   } catch (error) {
     console.error('Pipeline error:', error);
 
-    // If we have stale cache, serve it rather than failing
     if (cache.data) {
       console.log('Serving stale cache after error');
       res.status(200).json({ ...cache.data, meta: { ...cache.data.meta, stale: true } });
