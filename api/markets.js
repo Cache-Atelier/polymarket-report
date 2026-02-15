@@ -1,12 +1,11 @@
 // Vercel Serverless Function — Polymarket Report data pipeline
-// Fetches from Gamma API + Data API, ranks, generates AI headlines, caches
+// Fetches from Gamma API by tag, ranks, generates AI headlines, caches
 
 import {
   GAMMA_API,
   DATA_API,
   AI_PROVIDERS,
   TOTAL_MARKETS,
-  GAMMA_FETCH_LIMIT,
   INTERESTING_TAGS,
   WHALE_TRADE_THRESHOLD,
   WHALE_LOOKBACK_MINUTES,
@@ -24,46 +23,30 @@ import {
 let cache = { data: null, timestamp: 0 };
 
 // ============================================
-// GAMMA API — Fetch biggest movers (both directions)
+// GAMMA API — Fetch markets by curated tags
+// Primary data source: only fetches Politics, Elections, Science, AI, etc.
 // ============================================
-async function fetchBiggestMovers() {
-  // Fetch top gainers and top losers separately, merge by absolute change
-  const [gainersRes, losersRes] = await Promise.all([
-    fetch(`${GAMMA_API}/markets?active=true&closed=false&order=oneDayPriceChange&ascending=false&limit=${GAMMA_FETCH_LIMIT}`),
-    fetch(`${GAMMA_API}/markets?active=true&closed=false&order=oneDayPriceChange&ascending=true&limit=${GAMMA_FETCH_LIMIT}`),
-  ]);
-
-  if (!gainersRes.ok || !losersRes.ok) {
-    throw new Error(`Gamma API error: gainers=${gainersRes.status} losers=${losersRes.status}`);
-  }
-
-  const [gainers, losers] = await Promise.all([gainersRes.json(), losersRes.json()]);
-
-  // Merge and deduplicate by market ID
-  const seen = new Set();
-  const merged = [];
-  for (const m of [...gainers, ...losers]) {
-    const id = m.id || m.conditionId;
-    if (!seen.has(id) && m.oneDayPriceChange != null) {
-      seen.add(id);
-      merged.push(m);
+async function fetchMarketsByTags() {
+  const fetches = INTERESTING_TAGS.map(async (tag) => {
+    try {
+      const res = await fetch(
+        `${GAMMA_API}/markets?active=true&closed=false&tag=${encodeURIComponent(tag)}&order=volume24hr&ascending=false&limit=50`
+      );
+      if (!res.ok) {
+        console.error(`Tag "${tag}" fetch failed: ${res.status}`);
+        return [];
+      }
+      const markets = await res.json();
+      console.log(`  Tag "${tag}": ${markets.length} markets`);
+      return markets;
+    } catch (err) {
+      console.error(`Tag "${tag}" fetch error:`, err.message);
+      return [];
     }
-  }
+  });
 
-  // Sort by absolute 24h price change
-  merged.sort((a, b) => Math.abs(b.oneDayPriceChange) - Math.abs(a.oneDayPriceChange));
-  return merged;
-}
-
-// ============================================
-// GAMMA API — Fetch volume leaders
-// ============================================
-async function fetchVolumeLeaders() {
-  const res = await fetch(
-    `${GAMMA_API}/markets?active=true&closed=false&order=volume24hr&ascending=false&limit=${GAMMA_FETCH_LIMIT}`
-  );
-  if (!res.ok) throw new Error(`Gamma volume API error: ${res.status}`);
-  return res.json();
+  const results = await Promise.all(fetches);
+  return results.flat();
 }
 
 // ============================================
@@ -93,45 +76,18 @@ async function fetchWhaleTrades() {
 }
 
 // ============================================
-// GAMMA API — Fetch by interesting tags (Politics, AI, etc.)
-// This bypasses the noise-dominated "biggest movers" feed
-// ============================================
-async function fetchByTags() {
-  const fetches = INTERESTING_TAGS.map(async (tag) => {
-    try {
-      const res = await fetch(
-        `${GAMMA_API}/markets?active=true&closed=false&tag=${encodeURIComponent(tag)}&order=volume24hr&ascending=false&limit=40`
-      );
-      if (!res.ok) return [];
-      return res.json();
-    } catch {
-      return [];
-    }
-  });
-
-  const results = await Promise.all(fetches);
-  const all = results.flat();
-  console.log(`Tag-based fetch: ${all.length} markets from ${INTERESTING_TAGS.length} tags (${INTERESTING_TAGS.join(', ')})`);
-  return all;
-}
-
-// ============================================
-// NOISE FILTER — Exclude crypto prices, sports, weather, tweets, etc.
+// NOISE FILTER — Safety net for anything that slips through tags
 // ============================================
 function isNoiseMarket(market) {
   const question = market.question || market.title || '';
-  const matched = NOISE_PATTERNS.some(pattern => pattern.test(question));
-  if (matched) {
-    console.log(`  FILTERED: "${question.substring(0, 80)}"`);
-  }
-  return matched;
+  return NOISE_PATTERNS.some(pattern => pattern.test(question));
 }
 
 // ============================================
-// MERGE & RANK — Combine all feeds into one ranked list
+// RANK — Deduplicate, score, and select top markets
 // ============================================
-function mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades) {
-  // Build whale trade index: marketId → { count, totalUsd, largestSide, contrarian }
+function rankMarkets(tagMarkets, whaleTrades) {
+  // Build whale trade index
   const whaleIndex = {};
   for (const trade of whaleTrades) {
     const mid = trade.market || trade.conditionId || trade.asset;
@@ -144,60 +100,34 @@ function mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades) {
     whaleIndex[mid].sides.push(trade.side || trade.outcome);
   }
 
-  // Build a unified market map by ID
+  // Deduplicate by market ID (same market can appear under multiple tags)
   const marketMap = new Map();
-
-  // Add movers (primary source)
-  for (const m of movers) {
-    const id = m.id || m.conditionId;
-    marketMap.set(id, {
-      ...m,
-      _sources: ['movers'],
-      _absPriceChange: Math.abs(m.oneDayPriceChange || 0),
-    });
-  }
-
-  // Merge volume leaders
-  for (const m of volumeLeaders) {
-    const id = m.id || m.conditionId;
-    if (marketMap.has(id)) {
-      marketMap.get(id)._sources.push('volume');
-    } else {
-      marketMap.set(id, {
-        ...m,
-        _sources: ['volume'],
-        _absPriceChange: Math.abs(m.oneDayPriceChange || 0),
-      });
-    }
-  }
-
-  // Merge tag-fetched markets (these already passed tag filter, so are likely relevant)
   for (const m of tagMarkets) {
     const id = m.id || m.conditionId;
-    if (marketMap.has(id)) {
-      marketMap.get(id)._sources.push('tags');
-    } else if (m.oneDayPriceChange != null) {
+    if (!id || m.oneDayPriceChange == null) continue;
+    if (!marketMap.has(id)) {
       marketMap.set(id, {
         ...m,
-        _sources: ['tags'],
         _absPriceChange: Math.abs(m.oneDayPriceChange || 0),
       });
     }
   }
 
-  // Filter out noise markets (crypto prices, sports, weather, tweets, etc.)
+  // Safety net: filter any noise that slipped through tags
   let noiseCount = 0;
-  console.log(`Pre-filter: ${marketMap.size} unique markets`);
   for (const [id, m] of marketMap) {
     if (isNoiseMarket(m)) {
       marketMap.delete(id);
       noiseCount++;
     }
   }
-  console.log(`Filtered out ${noiseCount} noise markets, ${marketMap.size} remaining`);
+
+  const allMarkets = Array.from(marketMap.values());
+  console.log(`${tagMarkets.length} tag results → ${allMarkets.length} unique markets (${noiseCount} noise filtered)`);
+
+  if (allMarkets.length === 0) return [];
 
   // Compute normalization factors
-  const allMarkets = Array.from(marketMap.values());
   const maxAbsChange = Math.max(...allMarkets.map(m => m._absPriceChange), 0.001);
   const maxVolume = Math.max(...allMarkets.map(m => m.volume24hr || 0), 1);
 
@@ -206,26 +136,15 @@ function mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades) {
     const id = m.id || m.conditionId;
     const whale = whaleIndex[id];
 
-    // Normalized signals [0, 1]
     const priceSignal = m._absPriceChange / maxAbsChange;
     const volumeSignal = (m.volume24hr || 0) / maxVolume;
-    const whaleSignal = whale ? Math.min(whale.count / 3, 1) : 0; // 3+ whale trades = max signal
+    const whaleSignal = whale ? Math.min(whale.count / 3, 1) : 0;
     const newTrendingSignal = isNewAndTrending(m) ? 1 : 0;
 
     m._score = (priceSignal * WEIGHTS.priceChange)
              + (volumeSignal * WEIGHTS.volume)
              + (whaleSignal * WEIGHTS.whale)
              + (newTrendingSignal * WEIGHTS.newTrending);
-
-    // Multi-source boost: appearing in multiple feeds is extra signal
-    if (m._sources.length > 1) {
-      m._score *= 1.15;
-    }
-
-    // Tag relevance boost: markets from curated tags are more likely to be interesting
-    if (m._sources.includes('tags')) {
-      m._score *= 1.10;
-    }
 
     // Attach whale info for headline generation
     if (whale) {
@@ -238,26 +157,22 @@ function mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades) {
   // Sort by composite score, take top N
   allMarkets.sort((a, b) => b._score - a._score);
 
-  // Determine red headline threshold (top percentile of those we'll show)
   const displayed = allMarkets.slice(0, TOTAL_MARKETS);
   const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
   const scoreThreshold = displayed.length > 0
     ? displayed[redCount]._score
     : 0;
 
-  // Log what survived filtering for debugging
-  console.log(`Red threshold: top ${redCount} of ${displayed.length} (score >= ${scoreThreshold.toFixed(3)})`);
+  // Log top markets for debugging
+  console.log(`Displaying ${displayed.length} markets (${redCount} red)`);
   displayed.slice(0, 5).forEach((m, i) => {
-    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${(m.question || '').substring(0, 60)}" (sources: ${m._sources.join(',')})`);
+    const q = (m.question || '').substring(0, 70);
+    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${q}"`);
   });
 
-  // Prepare output
   return displayed.map(m => {
-    // Only top-scoring markets get red — NOT based on price change %
-    // (biggest movers almost always exceed any % threshold, making everything red)
     const isRed = m._score >= scoreThreshold;
 
-    // Best YES price: outcomePrices is typically a JSON string "[0.55, 0.45]"
     let bestYesPrice = 0.5;
     try {
       if (m.outcomePrices) {
@@ -366,7 +281,6 @@ async function generateHeadlines(markets) {
     }
   }
 
-  // Fallback: use raw market questions
   console.log('All AI providers failed, using raw market questions as headlines');
   return null;
 }
@@ -397,19 +311,17 @@ export default async function handler(req, res) {
 
     console.log('Cache miss — fetching fresh data');
 
-    // Fetch all data sources in parallel
-    const [movers, volumeLeaders, tagMarkets, whaleTrades] = await Promise.all([
-      fetchBiggestMovers(),
-      fetchVolumeLeaders(),
-      fetchByTags(),
+    // Fetch tag-based markets + whale trades in parallel
+    const [tagMarkets, whaleTrades] = await Promise.all([
+      fetchMarketsByTags(),
       fetchWhaleTrades(),
     ]);
 
-    console.log(`Fetched: ${movers.length} movers, ${volumeLeaders.length} volume leaders, ${tagMarkets.length} tag markets, ${whaleTrades.length} whale trades`);
+    console.log(`Fetched: ${tagMarkets.length} tag markets, ${whaleTrades.length} whale trades`);
 
-    // Merge and rank
-    const ranked = mergeAndRank(movers, volumeLeaders, tagMarkets, whaleTrades);
-    console.log(`Ranked: ${ranked.length} markets for display`);
+    // Rank and select
+    const ranked = rankMarkets(tagMarkets, whaleTrades);
+    console.log(`Final: ${ranked.length} markets for display`);
 
     // Generate AI headlines
     const headlines = await generateHeadlines(ranked);
@@ -424,12 +336,8 @@ export default async function handler(req, res) {
       markets,
       meta: {
         generated: new Date().toISOString(),
-        sources: {
-          movers: movers.length,
-          volumeLeaders: volumeLeaders.length,
-          tagMarkets: tagMarkets.length,
-          whaleTrades: whaleTrades.length,
-        },
+        tags: INTERESTING_TAGS,
+        sources: { tagMarkets: tagMarkets.length, whaleTrades: whaleTrades.length },
         aiProvider: headlines ? 'active' : 'fallback',
       },
     };
