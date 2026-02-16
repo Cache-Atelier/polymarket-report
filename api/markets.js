@@ -1,52 +1,119 @@
 // Vercel Serverless Function — Polymarket Report data pipeline
-// Fetches from Gamma API by tag, ranks, generates AI headlines, caches
+// Fetches from Gamma API using tag_id + featured events, ranks, generates AI headlines
 
 import {
   GAMMA_API,
   DATA_API,
   AI_PROVIDERS,
   TOTAL_MARKETS,
-  INTERESTING_TAGS,
+  LLM_CANDIDATE_POOL,
+  TAG_IDS,
+  TAG_SLUGS,
   WHALE_TRADE_THRESHOLD,
   WHALE_LOOKBACK_MINUTES,
   WEIGHTS,
   RED_THRESHOLDS,
   CACHE_TTL_MS,
   NOISE_PATTERNS,
+  VOLUME_FLOOR,
+  VOLUME_FLOOR_PENALTY,
+  EXPIRY_DRIFT,
+  EDITORIAL_SYSTEM_PROMPT,
+  buildEditorialUserPrompt,
   HEADLINE_SYSTEM_PROMPT,
   buildHeadlineUserPrompt,
 } from './config.js';
 
 // ============================================
-// IN-MEMORY CACHE (persists across warm invocations)
+// IN-MEMORY CACHES (persist across warm invocations)
 // ============================================
 let cache = { data: null, timestamp: 0 };
+let slugIdCache = null; // slug → tag_id mapping, resolved once per cold start
 
 // ============================================
-// GAMMA API — Fetch markets by curated tags
-// Primary data source: only fetches Politics, Elections, Science, AI, etc.
+// SLUG → TAG_ID RESOLVER
+// The /markets?tag=slug endpoint is broken (returns unfiltered results
+// regardless of slug). The /markets?tag_id=N endpoint works correctly.
+// So we resolve our curated slugs to numeric IDs via /tags/slug/{slug},
+// then fetch markets using tag_id.
 // ============================================
-async function fetchMarketsByTags() {
-  const fetches = INTERESTING_TAGS.map(async (tag) => {
-    try {
-      const res = await fetch(
-        `${GAMMA_API}/markets?active=true&closed=false&tag=${encodeURIComponent(tag)}&order=volume24hr&ascending=false&limit=50`
-      );
-      if (!res.ok) {
-        console.error(`Tag "${tag}" fetch failed: ${res.status}`);
-        return [];
+async function resolveTagSlugs() {
+  if (slugIdCache) return slugIdCache;
+
+  const results = await Promise.all(
+    TAG_SLUGS.map(async (slug) => {
+      try {
+        const res = await fetch(`${GAMMA_API}/tags/slug/${slug}`);
+        if (!res.ok) {
+          console.log(`  slug "${slug}": ${res.status} (not found)`);
+          return null;
+        }
+        const tag = await res.json();
+        return { slug, id: tag.id, label: tag.label };
+      } catch (err) {
+        console.log(`  slug "${slug}": error (${err.message})`);
+        return null;
       }
-      const markets = await res.json();
-      console.log(`  Tag "${tag}": ${markets.length} markets`);
-      return markets;
-    } catch (err) {
-      console.error(`Tag "${tag}" fetch error:`, err.message);
+    })
+  );
+
+  slugIdCache = results.filter(Boolean);
+  console.log(`Resolved ${slugIdCache.length}/${TAG_SLUGS.length} tag slugs to IDs`);
+  slugIdCache.forEach(t => console.log(`  ${t.slug} → ${t.id} (${t.label})`));
+  return slugIdCache;
+}
+
+// ============================================
+// STRATEGY 1: Featured events (Polymarket's editorial picks)
+// ============================================
+async function fetchFeaturedEvents() {
+  try {
+    const res = await fetch(
+      `${GAMMA_API}/events?featured=true&active=true&closed=false&limit=30`
+    );
+    if (!res.ok) {
+      console.log(`  Featured events: ${res.status}`);
       return [];
     }
-  });
+    const events = await res.json();
+    // Extract nested markets from events
+    const markets = [];
+    for (const evt of events) {
+      if (evt.markets && Array.isArray(evt.markets)) {
+        for (const m of evt.markets) {
+          markets.push({ ...m, _isFeatured: true });
+        }
+      }
+    }
+    console.log(`  Featured: ${events.length} events → ${markets.length} markets`);
+    return markets;
+  } catch (err) {
+    console.log(`  Featured events: error (${err.message})`);
+    return [];
+  }
+}
 
-  const results = await Promise.all(fetches);
-  return results.flat();
+// ============================================
+// STRATEGY 2: Markets by tag_id (works correctly, unlike tag=slug)
+// ============================================
+async function fetchMarketsByTagId(id, label, limit = 50) {
+  try {
+    const res = await fetch(
+      `${GAMMA_API}/markets?tag_id=${id}&active=true&closed=false&order=volume24hr&ascending=false&limit=${limit}`
+    );
+    if (!res.ok) {
+      console.log(`  tag_id ${id} (${label}): ${res.status}`);
+      return [];
+    }
+    const markets = await res.json();
+    if (markets.length > 0) {
+      console.log(`  tag_id ${id} (${label}): ${markets.length} markets`);
+    }
+    return markets;
+  } catch (err) {
+    console.log(`  tag_id ${id} (${label}): error (${err.message})`);
+    return [];
+  }
 }
 
 // ============================================
@@ -62,8 +129,6 @@ async function fetchWhaleTrades() {
       return [];
     }
     const trades = await res.json();
-
-    // Filter to recent trades only
     const cutoff = Date.now() - WHALE_LOOKBACK_MINUTES * 60 * 1000;
     return (trades || []).filter(t => {
       const ts = new Date(t.timestamp || t.created_at || t.createdAt).getTime();
@@ -76,7 +141,32 @@ async function fetchWhaleTrades() {
 }
 
 // ============================================
-// NOISE FILTER — Safety net for anything that slips through tags
+// COMBINED FETCH: resolve slugs, then fetch all in parallel
+// ============================================
+async function fetchAllMarkets() {
+  console.log('Phase 1: Resolving tag slugs to IDs...');
+  const resolvedTags = await resolveTagSlugs();
+
+  // Build full list of tag_ids: top-level + resolved sub-tags
+  const allTagIds = [
+    ...TAG_IDS.map(t => ({ ...t, limit: 50 })),
+    ...resolvedTags.map(t => ({ id: t.id, label: `${t.label} [${t.slug}]`, limit: 30 })),
+  ];
+
+  console.log(`Phase 2: Fetching from ${allTagIds.length} tag_ids + featured events...`);
+  const [featured, ...tagResults] = await Promise.all([
+    fetchFeaturedEvents(),
+    ...allTagIds.map(t => fetchMarketsByTagId(t.id, t.label, t.limit)),
+  ]);
+
+  const tagMarkets = tagResults.flat();
+  console.log(`Strategy totals: ${featured.length} featured, ${tagMarkets.length} from tag_ids`);
+
+  return [...featured, ...tagMarkets];
+}
+
+// ============================================
+// NOISE FILTER — Lightweight safety net
 // ============================================
 function isNoiseMarket(market) {
   const question = market.question || market.title || '';
@@ -86,7 +176,7 @@ function isNoiseMarket(market) {
 // ============================================
 // RANK — Deduplicate, score, and select top markets
 // ============================================
-function rankMarkets(tagMarkets, whaleTrades) {
+function rankMarkets(allMarkets, whaleTrades) {
   // Build whale trade index
   const whaleIndex = {};
   for (const trade of whaleTrades) {
@@ -100,20 +190,23 @@ function rankMarkets(tagMarkets, whaleTrades) {
     whaleIndex[mid].sides.push(trade.side || trade.outcome);
   }
 
-  // Deduplicate by market ID (same market can appear under multiple tags)
+  // Deduplicate by market ID
   const marketMap = new Map();
-  for (const m of tagMarkets) {
+  for (const m of allMarkets) {
     const id = m.id || m.conditionId;
     if (!id || m.oneDayPriceChange == null) continue;
     if (!marketMap.has(id)) {
       marketMap.set(id, {
         ...m,
         _absPriceChange: Math.abs(m.oneDayPriceChange || 0),
+        _isFeatured: !!m._isFeatured,
       });
+    } else if (m._isFeatured) {
+      marketMap.get(id)._isFeatured = true;
     }
   }
 
-  // Safety net: filter any noise that slipped through tags
+  // Safety net noise filter
   let noiseCount = 0;
   for (const [id, m] of marketMap) {
     if (isNoiseMarket(m)) {
@@ -122,31 +215,62 @@ function rankMarkets(tagMarkets, whaleTrades) {
     }
   }
 
-  const allMarkets = Array.from(marketMap.values());
-  console.log(`${tagMarkets.length} tag results → ${allMarkets.length} unique markets (${noiseCount} noise filtered)`);
+  const scorable = Array.from(marketMap.values());
+  console.log(`${allMarkets.length} raw → ${scorable.length} unique (${noiseCount} noise filtered)`);
 
-  if (allMarkets.length === 0) return [];
+  if (scorable.length === 0) return [];
 
-  // Compute normalization factors
-  const maxAbsChange = Math.max(...allMarkets.map(m => m._absPriceChange), 0.001);
-  const maxVolume = Math.max(...allMarkets.map(m => m.volume24hr || 0), 1);
+  // Normalization
+  const maxAbsChange = Math.max(...scorable.map(m => m._absPriceChange), 0.001);
+  const maxVolume = Math.max(...scorable.map(m => m.volume24hr || 0), 1);
 
   // Score each market
-  for (const m of allMarkets) {
+  for (const m of scorable) {
     const id = m.id || m.conditionId;
     const whale = whaleIndex[id];
 
-    const priceSignal = m._absPriceChange / maxAbsChange;
+    let priceSignal = m._absPriceChange / maxAbsChange;
     const volumeSignal = (m.volume24hr || 0) / maxVolume;
     const whaleSignal = whale ? Math.min(whale.count / 3, 1) : 0;
     const newTrendingSignal = isNewAndTrending(m) ? 1 : 0;
 
-    m._score = (priceSignal * WEIGHTS.priceChange)
-             + (volumeSignal * WEIGHTS.volume)
+    // Expiry drift dampener: markets near deadline naturally resolve toward
+    // 0% or 100%. A big price swing there isn't news — it's just a clock
+    // running out. Dampen the price signal for these.
+    if (m.endDate) {
+      const daysToExpiry = (new Date(m.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+      let yesPrice = 0.5;
+      try {
+        if (m.outcomePrices) {
+          const prices = typeof m.outcomePrices === 'string'
+            ? JSON.parse(m.outcomePrices) : m.outcomePrices;
+          yesPrice = parseFloat(prices[0]) || 0.5;
+        } else if (m.bestBid != null) {
+          yesPrice = m.bestBid;
+        }
+      } catch { /* use default */ }
+
+      if (daysToExpiry <= EXPIRY_DRIFT.daysThreshold
+          && (yesPrice < EXPIRY_DRIFT.priceExtremeBelow || yesPrice > EXPIRY_DRIFT.priceExtremeAbove)) {
+        priceSignal *= EXPIRY_DRIFT.dampener;
+      }
+    }
+
+    m._score = (volumeSignal * WEIGHTS.volume)
+             + (priceSignal * WEIGHTS.priceChange)
              + (whaleSignal * WEIGHTS.whale)
              + (newTrendingSignal * WEIGHTS.newTrending);
 
-    // Attach whale info for headline generation
+    // Volume floor: a big swing in a tiny market is illiquidity, not news
+    if ((m.volume24hr || 0) < VOLUME_FLOOR) {
+      m._score *= VOLUME_FLOOR_PENALTY;
+    }
+
+    // Featured boost: Polymarket's editorial picks
+    if (m._isFeatured) {
+      m._score *= WEIGHTS.featuredBoost;
+    }
+
     if (whale) {
       const dominantSide = getMajoritySide(whale.sides);
       m._whaleInfo = whale;
@@ -154,25 +278,21 @@ function rankMarkets(tagMarkets, whaleTrades) {
     }
   }
 
-  // Sort by composite score, take top N
-  allMarkets.sort((a, b) => b._score - a._score);
+  // Sort by composite score, take top N (larger pool for LLM curation)
+  scorable.sort((a, b) => b._score - a._score);
 
-  const displayed = allMarkets.slice(0, TOTAL_MARKETS);
-  const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
-  const scoreThreshold = displayed.length > 0
-    ? displayed[redCount]._score
-    : 0;
+  const poolSize = Math.min(scorable.length, LLM_CANDIDATE_POOL);
+  const candidates = scorable.slice(0, poolSize);
 
-  // Log top markets for debugging
-  console.log(`Displaying ${displayed.length} markets (${redCount} red)`);
-  displayed.slice(0, 5).forEach((m, i) => {
+  // Log top candidates
+  console.log(`Candidate pool: ${candidates.length} markets for LLM curation`);
+  candidates.slice(0, 8).forEach((m, i) => {
     const q = (m.question || '').substring(0, 70);
-    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${q}"`);
+    const feat = m._isFeatured ? ' [FEAT]' : '';
+    console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${q}"${feat}`);
   });
 
-  return displayed.map(m => {
-    const isRed = m._score >= scoreThreshold;
-
+  return candidates.map(m => {
     let bestYesPrice = 0.5;
     try {
       if (m.outcomePrices) {
@@ -197,7 +317,7 @@ function rankMarkets(tagMarkets, whaleTrades) {
       resolved: !!m.resolved,
       endDate: m.endDate,
       whaleSignal: m.whaleSignal || null,
-      isRed,
+      isFeatured: !!m._isFeatured,
       score: Math.round(m._score * 1000) / 1000,
     };
   });
@@ -220,20 +340,122 @@ function getMajoritySide(sides) {
 }
 
 // ============================================
-// AI HEADLINE GENERATION
+// LLM EDITORIAL CURATION
+// Sends ~40 candidates to the LLM. It selects 28, reorders, writes headlines,
+// and decides which are red. Returns fully curated market array.
 // ============================================
-async function generateHeadlines(markets) {
-  const userPrompt = buildHeadlineUserPrompt(markets);
+async function curateWithLLM(candidates) {
+  const userPrompt = buildEditorialUserPrompt(candidates);
+
+  // Build a lookup so we can reconstruct full market objects from LLM's picks
+  const candidateMap = new Map();
+  for (const m of candidates) {
+    candidateMap.set(String(m.id), m);
+  }
 
   for (const provider of AI_PROVIDERS) {
     const apiKey = process.env[provider.envKey];
     if (!apiKey) {
-      console.log(`AI provider ${provider.name}: no API key (${provider.envKey}), skipping`);
+      console.log(`AI curation ${provider.name}: no API key (${provider.envKey}), skipping`);
       continue;
     }
 
     try {
-      console.log(`Trying AI provider: ${provider.name}`);
+      console.log(`Trying AI curation via ${provider.name}...`);
+      const res = await fetch(provider.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
+            { role: 'system', content: EDITORIAL_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 4000,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error(`AI curation ${provider.name} returned ${res.status}: ${errText}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error(`AI curation ${provider.name}: empty response`);
+        continue;
+      }
+
+      const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
+      const picks = JSON.parse(cleaned);
+
+      if (!Array.isArray(picks) || picks.length === 0) {
+        console.error(`AI curation ${provider.name}: invalid response (not an array or empty)`);
+        continue;
+      }
+
+      // Reconstruct full market objects in the LLM's chosen order
+      const curated = [];
+      for (const pick of picks) {
+        const original = candidateMap.get(String(pick.id));
+        if (!original) {
+          console.log(`  LLM picked unknown id "${pick.id}", skipping`);
+          continue;
+        }
+        curated.push({
+          ...original,
+          headline: pick.headline || null,
+          isRed: !!pick.isRed,
+        });
+      }
+
+      if (curated.length < TOTAL_MARKETS * 0.5) {
+        console.error(`AI curation ${provider.name}: only matched ${curated.length}/${picks.length} IDs, too few`);
+        continue;
+      }
+
+      console.log(`AI curation via ${provider.name}: ${curated.length} markets curated (${curated.filter(m => m.isRed).length} red)`);
+      curated.slice(0, 5).forEach((m, i) => {
+        const red = m.isRed ? ' [RED]' : '';
+        console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
+      });
+
+      return curated.slice(0, TOTAL_MARKETS);
+    } catch (err) {
+      console.error(`AI curation ${provider.name} failed:`, err.message);
+      continue;
+    }
+  }
+
+  console.log('All AI providers failed for curation');
+  return null;
+}
+
+// ============================================
+// FALLBACK: Algorithmic ordering + headline-only LLM pass
+// Used when editorial curation fails entirely.
+// ============================================
+async function fallbackHeadlines(candidates) {
+  const displayed = candidates.slice(0, TOTAL_MARKETS);
+  const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
+  const scoreThreshold = displayed.length > 0 ? displayed[redCount]?.score || 0 : 0;
+
+  // Try headline-only LLM pass
+  const userPrompt = buildHeadlineUserPrompt(displayed);
+  let headlines = null;
+
+  for (const provider of AI_PROVIDERS) {
+    const apiKey = process.env[provider.envKey];
+    if (!apiKey) continue;
+
+    try {
+      console.log(`Fallback headlines via ${provider.name}...`);
       const res = await fetch(provider.url, {
         method: 'POST',
         headers: {
@@ -251,38 +473,28 @@ async function generateHeadlines(markets) {
         }),
       });
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        console.error(`AI provider ${provider.name} returned ${res.status}: ${errText}`);
-        continue;
-      }
-
+      if (!res.ok) continue;
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error(`AI provider ${provider.name}: empty response`);
-        continue;
-      }
+      if (!content) continue;
 
-      // Parse JSON array from response (handle markdown code fences)
       const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      const headlines = JSON.parse(cleaned);
-
-      if (Array.isArray(headlines) && headlines.length === markets.length) {
-        console.log(`AI headlines generated via ${provider.name}`);
-        return headlines;
-      } else {
-        console.error(`AI provider ${provider.name}: expected ${markets.length} headlines, got ${headlines?.length}`);
-        continue;
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.length === displayed.length) {
+        headlines = parsed;
+        console.log(`Fallback headlines generated via ${provider.name}`);
+        break;
       }
     } catch (err) {
-      console.error(`AI provider ${provider.name} failed:`, err.message);
-      continue;
+      console.error(`Fallback headline ${provider.name} failed:`, err.message);
     }
   }
 
-  console.log('All AI providers failed, using raw market questions as headlines');
-  return null;
+  return displayed.map((m, i) => ({
+    ...m,
+    headline: headlines ? headlines[i] : null,
+    isRed: m.score >= scoreThreshold,
+  }));
 }
 
 // ============================================
@@ -299,7 +511,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Check cache
     const now = Date.now();
     const ttl = parseInt(process.env.CACHE_TTL_MS) || CACHE_TTL_MS;
 
@@ -311,45 +522,47 @@ export default async function handler(req, res) {
 
     console.log('Cache miss — fetching fresh data');
 
-    // Fetch tag-based markets + whale trades in parallel
-    const [tagMarkets, whaleTrades] = await Promise.all([
-      fetchMarketsByTags(),
+    // Fetch all markets + whale trades in parallel
+    const [allMarkets, whaleTrades] = await Promise.all([
+      fetchAllMarkets(),
       fetchWhaleTrades(),
     ]);
 
-    console.log(`Fetched: ${tagMarkets.length} tag markets, ${whaleTrades.length} whale trades`);
+    console.log(`Total: ${allMarkets.length} markets, ${whaleTrades.length} whale trades`);
 
-    // Rank and select
-    const ranked = rankMarkets(tagMarkets, whaleTrades);
-    console.log(`Final: ${ranked.length} markets for display`);
+    // Phase 1: Algorithmic scoring → candidate pool (~42 markets)
+    const candidates = rankMarkets(allMarkets, whaleTrades);
+    console.log(`Candidate pool: ${candidates.length} markets`);
 
-    // Generate AI headlines
-    const headlines = await generateHeadlines(ranked);
+    // Phase 2: LLM editorial curation (select, reorder, headline, red-flag)
+    let markets = await curateWithLLM(candidates);
+    let aiMode = 'curated';
 
-    // Attach headlines to markets
-    const markets = ranked.map((m, i) => ({
-      ...m,
-      headline: headlines ? headlines[i] : null,
-    }));
+    // Phase 2b: Fallback to algorithmic order + headline-only LLM
+    if (!markets) {
+      console.log('Falling back to algorithmic ordering + headline generation');
+      markets = await fallbackHeadlines(candidates);
+      aiMode = markets[0]?.headline ? 'headlines-only' : 'fallback';
+    }
+
+    console.log(`Final: ${markets.length} markets (mode: ${aiMode})`);
 
     const result = {
       markets,
       meta: {
         generated: new Date().toISOString(),
-        tags: INTERESTING_TAGS,
-        sources: { tagMarkets: tagMarkets.length, whaleTrades: whaleTrades.length },
-        aiProvider: headlines ? 'active' : 'fallback',
+        tagIds: TAG_IDS.map(t => t.label),
+        resolvedSlugs: (slugIdCache || []).map(t => `${t.slug}→${t.id}`),
+        sources: { totalMarkets: allMarkets.length, whaleTrades: whaleTrades.length },
+        aiProvider: aiMode,
       },
     };
 
-    // Update cache
     cache = { data: result, timestamp: now };
-
     res.status(200).json(result);
   } catch (error) {
     console.error('Pipeline error:', error);
 
-    // If we have stale cache, serve it rather than failing
     if (cache.data) {
       console.log('Serving stale cache after error');
       res.status(200).json({ ...cache.data, meta: { ...cache.data.meta, stale: true } });

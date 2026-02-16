@@ -14,14 +14,8 @@ export const AI_PROVIDERS = [
   {
     name: 'opencode-zen',
     url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'opencode/kimi-k2.5-free',
+    model: 'minimax-m2.5-free',
     envKey: 'OPENCODE_API_KEY',
-  },
-  {
-    name: 'nvidia-nim',
-    url: 'https://integrate.api.nvidia.com/v1/chat/completions',
-    model: 'moonshotai/kimi-k2.5',
-    envKey: 'NVIDIA_API_KEY',
   },
 ];
 
@@ -29,21 +23,73 @@ export const AI_PROVIDERS = [
 // MARKET FETCHING
 // ============================================
 export const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
+export const LLM_CANDIDATE_POOL = 42;     // Send more to LLM so it can curate/drop
 export const WHALE_TRADE_THRESHOLD = 10000; // USD minimum for whale trade detection
 export const WHALE_LOOKBACK_MINUTES = 120;  // How far back to scan for whale trades
 
-// Tags to fetch from directly — this is the PRIMARY content filter.
-// Only markets tagged with these categories are fetched from the Gamma API.
-export const INTERESTING_TAGS = ['Politics', 'Elections', 'Science', 'AI', 'World', 'Economy'];
+// --- TAG-BASED CONTENT CURATION ---
+// We use THREE complementary fetch strategies and merge the results:
+//
+// 1. FEATURED EVENTS: Polymarket's own editorial picks (featured=true)
+// 2. TOP-LEVEL TAG IDs: Broad categories with known numeric IDs
+// 3. SUB-TAG SLUGS: Specific sub-topics cherry-picked for news value
+//
+// This is the PRIMARY content filter. If it's not in these lists, it doesn't
+// appear on the site. The noise regex is just a lightweight safety net.
+
+// Top-level categories by tag_id (confirmed from Polymarket frontend source)
+// We ONLY include news-worthy categories — Sports (100639), Crypto (21),
+// and Culture (596) are intentionally excluded.
+export const TAG_IDS = [
+  { id: 2,      label: 'Politics' },
+  { id: 100265, label: 'Geopolitics' },
+  { id: 1401,   label: 'Tech' },
+  // Finance (120) excluded at top-level — too much price speculation.
+  // We cherry-pick newsworthy finance sub-tags below instead.
+];
+
+// Specific sub-tags by slug, curated for news signal.
+// These drill into topics that the broad tag_ids might miss,
+// and let us grab finance/economy news without the price noise.
+export const TAG_SLUGS = [
+  // Politics & Law
+  'elections', 'us-elections', 'global-elections', 'congress', 'courts', 'scotus',
+  // Geopolitics & World
+  'world', 'ukraine', 'middle-east', 'china', 'iran', 'israel',
+  // Economy & Policy (NOT price speculation)
+  'economy', 'economic-policy', 'fed', 'tariffs', 'trade-war', 'business',
+  // Science & Space
+  'science', 'space',
+  // AI (dedicated sub-tag, more specific than broad Tech)
+  'ai',
+];
 
 // ============================================
 // RANKING WEIGHTS
 // ============================================
 export const WEIGHTS = {
-  priceChange: 0.40,   // Big price moves = something happened
-  volume: 0.25,        // High volume = market cares
+  volume: 0.35,        // High volume = the world cares (best proxy for newsworthiness)
+  priceChange: 0.25,   // Big price moves = something happened
   whale: 0.25,         // Whale/contrarian bets = insider signal
   newTrending: 0.10,   // New markets gaining traction
+  featuredBoost: 1.25, // Multiplier for Polymarket editorial picks
+};
+
+// ============================================
+// SCORING ADJUSTMENTS
+// ============================================
+// Volume floor: markets below this threshold get a penalty.
+// A $10K market with a big swing is just illiquid, not news.
+export const VOLUME_FLOOR = 25_000;       // USD
+export const VOLUME_FLOOR_PENALTY = 0.4;  // Score multiplied by this when below floor
+
+// Expiry drift: markets near deadline naturally swing to 0% or 100%.
+// That's not news — it's just a clock running out. Dampen those.
+export const EXPIRY_DRIFT = {
+  daysThreshold: 7,         // Market expires within this many days
+  priceExtremeBelow: 0.15,  // YES price below 15%...
+  priceExtremeAbove: 0.85,  // ...or above 85%
+  dampener: 0.3,            // Price signal multiplied by this
 };
 
 // ============================================
@@ -146,8 +192,85 @@ export const NOISE_PATTERNS = [
 ];
 
 // ============================================
-// AI HEADLINE PROMPT
+// AI EDITORIAL CURATION PROMPT
+// The LLM acts as editor-in-chief: it selects, orders, headlines, and flags.
 // ============================================
+export const EDITORIAL_SYSTEM_PROMPT = `You are the editor-in-chief of POLYMARKET REPORT, a prediction-market news aggregator in the style of the Drudge Report.
+
+You will receive ~40 candidate prediction markets, pre-scored by an algorithm. Your job is to make EDITORIAL DECISIONS:
+
+1. SELECT the ${TOTAL_MARKETS} most newsworthy markets. Drop boring, niche, or redundant ones.
+2. ORDER them by newsworthiness. Position 1 = the MAIN HEADLINE (biggest story right now).
+3. HEADLINE: Write a punchy Drudge-style headline for each selected market.
+4. RED FLAG: Mark 2-4 headlines as "red" (breaking / urgent / high-drama).
+
+EDITORIAL JUDGMENT — what makes a story worth leading with:
+- Real-world consequence: Wars, elections, Fed policy, investigations that affect millions
+- High stakes: Markets with massive volume ($1M+) signal that the world is paying attention
+- Breaking developments: Big price swings on CONSEQUENTIAL topics (not just any big swing)
+- Contrarian/whale signals: Smart money moving against the crowd
+- Political drama: Power struggles, resignations, indictments, scandal
+
+WHAT TO DEPRIORITIZE OR DROP:
+- "Will X happen by [specific near-term date]?" markets that are just clocks winding down
+- Niche markets with low real-world impact (product launch dates, turnout %, etc.)
+- Redundant markets: if multiple brackets cover the same event, pick the ONE most dramatic
+- Markets where the outcome is near-certain (>95% or <5%) UNLESS the certainty itself is the story
+- Procedural/technical markets (election turnout bands, SPX open direction, etc.)
+
+FACTUAL ACCURACY:
+- NEVER claim something happened just because the price moved. 92% ≠ confirmed.
+- resolved: true → the outcome IS fact. State it definitively.
+- resolved: false → frame as sentiment: "Bettors surge toward...", "Odds spike for...", "Market at X%..."
+- A price DROP on YES means the event is now LESS likely — don't invert this.
+- Read the description to understand what the market actually resolves on.
+- Whale trades: frame as "Smart money betting on..." — do NOT claim insider knowledge.
+
+HEADLINE STYLE:
+- Drudge Report energy: urgent, punchy, ALL-CAPS sparingly for emphasis
+- Under 80 characters
+- Active voice, present tense
+- Include odds when they add drama (e.g., "NOW AT 94%")
+- No question marks — declarations, not questions
+- No quotation marks wrapping the whole headline
+
+OUTPUT: Return a JSON array of exactly ${TOTAL_MARKETS} objects in your chosen display order:
+[
+  { "id": "market_id", "headline": "HEADLINE TEXT", "isRed": true },
+  { "id": "market_id", "headline": "HEADLINE TEXT", "isRed": false },
+  ...
+]
+Nothing else — no markdown, no explanation, no commentary.`;
+
+export function buildEditorialUserPrompt(markets) {
+  const entries = markets.map((m, i) => {
+    const parts = [
+      `[${i + 1}] id: "${m.id}"`,
+      `    Question: "${m.question}"`,
+      `    YES price: ${(m.bestYesPrice * 100).toFixed(1)}%`,
+      `    24h change: ${m.oneDayPriceChange >= 0 ? '+' : ''}${(m.oneDayPriceChange * 100).toFixed(1)}%`,
+      `    24h volume: $${Math.round(m.volume24hr || 0).toLocaleString()}`,
+      `    Algo score: ${m.score.toFixed(3)}`,
+      `    Expires: ${m.endDate || 'N/A'}`,
+      `    Featured: ${m.isFeatured ? 'YES' : 'no'}`,
+      `    ${m.resolved ? 'STATUS: RESOLVED — outcome is confirmed fact' : 'STATUS: UNRESOLVED — not yet determined'}`,
+    ];
+    if (m.description) {
+      const desc = m.description.length > 400
+        ? m.description.substring(0, 400) + '...'
+        : m.description;
+      parts.push(`    Resolution criteria: ${desc}`);
+    }
+    if (m.whaleSignal) {
+      parts.push(`    WHALE ALERT: ${m.whaleSignal}`);
+    }
+    return parts.join('\n');
+  });
+
+  return `Today's date: ${new Date().toISOString().split('T')[0]}\n\nHere are ${markets.length} candidate markets. Select the best ${TOTAL_MARKETS}, order by newsworthiness, write headlines, and flag 2-4 as red:\n\n${entries.join('\n\n')}`;
+}
+
+// Legacy headline-only prompt (used as fallback when LLM curation fails)
 export const HEADLINE_SYSTEM_PROMPT = `You are a headline writer for a prediction-market news aggregator styled after the Drudge Report.
 
 Your job: turn prediction market data into short, punchy, informative headlines that tell the reader what is ACTUALLY HAPPENING in the world right now.
@@ -187,7 +310,6 @@ export function buildHeadlineUserPrompt(markets) {
       parts.push(`   STATUS: UNRESOLVED — outcome is NOT yet determined`);
     }
     if (m.description) {
-      // Truncate long descriptions to keep prompt manageable
       const desc = m.description.length > 300
         ? m.description.substring(0, 300) + '...'
         : m.description;
