@@ -362,6 +362,8 @@ async function curateWithLLM(candidates) {
 
     try {
       console.log(`Trying AI curation via ${provider.name}...`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45_000);
       const res = await fetch(provider.url, {
         method: 'POST',
         headers: {
@@ -377,7 +379,9 @@ async function curateWithLLM(candidates) {
           temperature: 0.7,
           max_tokens: 4000,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
@@ -456,6 +460,8 @@ async function fallbackHeadlines(candidates) {
 
     try {
       console.log(`Fallback headlines via ${provider.name}...`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
       const res = await fetch(provider.url, {
         method: 'POST',
         headers: {
@@ -471,7 +477,9 @@ async function fallbackHeadlines(candidates) {
           temperature: 0.7,
           max_tokens: 2000,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (!res.ok) continue;
       const data = await res.json();
