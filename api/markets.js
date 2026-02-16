@@ -390,14 +390,26 @@ async function curateWithLLM(candidates) {
       }
 
       const data = await res.json();
-      const content = data.choices?.[0]?.message?.content;
+      const content = data.choices?.[0]?.message?.content
+        || data.choices?.[0]?.message?.text        // some providers use 'text'
+        || data.choices?.[0]?.text                  // legacy completions format
+        || (typeof data.result === 'string' ? data.result : null);
       if (!content) {
-        console.error(`AI curation ${provider.name}: empty response`);
+        console.error(`AI curation ${provider.name}: empty response. Keys: ${JSON.stringify(Object.keys(data))}` +
+          (data.choices?.[0] ? `. Choice keys: ${JSON.stringify(Object.keys(data.choices[0]))}` : '') +
+          (data.choices?.[0]?.message ? `. Message keys: ${JSON.stringify(Object.keys(data.choices[0].message))}` : '') +
+          (data.error ? `. Error: ${JSON.stringify(data.error)}` : ''));
         continue;
       }
 
       const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      const picks = JSON.parse(cleaned);
+      let picks = JSON.parse(cleaned);
+
+      // Some models wrap the array in an object — unwrap it
+      if (picks && !Array.isArray(picks) && typeof picks === 'object') {
+        const arrVal = Object.values(picks).find(v => Array.isArray(v));
+        if (arrVal) picks = arrVal;
+      }
 
       if (!Array.isArray(picks) || picks.length === 0) {
         console.error(`AI curation ${provider.name}: invalid response (not an array or empty)`);
@@ -481,13 +493,30 @@ async function fallbackHeadlines(candidates) {
       });
       clearTimeout(timeout);
 
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.error(`Fallback headline ${provider.name} returned ${res.status}`);
+        continue;
+      }
       const data = await res.json();
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) continue;
+      const content = data.choices?.[0]?.message?.content
+        || data.choices?.[0]?.message?.text
+        || data.choices?.[0]?.text
+        || (typeof data.result === 'string' ? data.result : null);
+      if (!content) {
+        console.error(`Fallback headline ${provider.name}: empty response. Keys: ${JSON.stringify(Object.keys(data))}` +
+          (data.error ? `. Error: ${JSON.stringify(data.error)}` : ''));
+        continue;
+      }
 
       const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      const parsed = JSON.parse(cleaned);
+      let parsed = JSON.parse(cleaned);
+
+      // Unwrap if model wrapped the array in an object
+      if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
+        const arrVal = Object.values(parsed).find(v => Array.isArray(v));
+        if (arrVal) parsed = arrVal;
+      }
+
       if (Array.isArray(parsed) && parsed.length === displayed.length) {
         headlines = parsed;
         console.log(`Fallback headlines generated via ${provider.name}`);
