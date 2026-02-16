@@ -6,6 +6,7 @@ import {
   DATA_API,
   AI_PROVIDERS,
   TOTAL_MARKETS,
+  LLM_CANDIDATE_POOL,
   TAG_IDS,
   TAG_SLUGS,
   WHALE_TRADE_THRESHOLD,
@@ -17,6 +18,8 @@ import {
   VOLUME_FLOOR,
   VOLUME_FLOOR_PENALTY,
   EXPIRY_DRIFT,
+  EDITORIAL_SYSTEM_PROMPT,
+  buildEditorialUserPrompt,
   HEADLINE_SYSTEM_PROMPT,
   buildHeadlineUserPrompt,
 } from './config.js';
@@ -275,24 +278,21 @@ function rankMarkets(allMarkets, whaleTrades) {
     }
   }
 
-  // Sort by composite score, take top N
+  // Sort by composite score, take top N (larger pool for LLM curation)
   scorable.sort((a, b) => b._score - a._score);
 
-  const displayed = scorable.slice(0, TOTAL_MARKETS);
-  const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
-  const scoreThreshold = displayed.length > 0 ? displayed[redCount]._score : 0;
+  const poolSize = Math.min(scorable.length, LLM_CANDIDATE_POOL);
+  const candidates = scorable.slice(0, poolSize);
 
-  // Log top markets
-  console.log(`Displaying ${displayed.length} markets (${redCount} red)`);
-  displayed.slice(0, 8).forEach((m, i) => {
+  // Log top candidates
+  console.log(`Candidate pool: ${candidates.length} markets for LLM curation`);
+  candidates.slice(0, 8).forEach((m, i) => {
     const q = (m.question || '').substring(0, 70);
     const feat = m._isFeatured ? ' [FEAT]' : '';
     console.log(`  #${i + 1}: [${m._score.toFixed(3)}] "${q}"${feat}`);
   });
 
-  return displayed.map(m => {
-    const isRed = m._score >= scoreThreshold;
-
+  return candidates.map(m => {
     let bestYesPrice = 0.5;
     try {
       if (m.outcomePrices) {
@@ -317,7 +317,7 @@ function rankMarkets(allMarkets, whaleTrades) {
       resolved: !!m.resolved,
       endDate: m.endDate,
       whaleSignal: m.whaleSignal || null,
-      isRed,
+      isFeatured: !!m._isFeatured,
       score: Math.round(m._score * 1000) / 1000,
     };
   });
@@ -340,20 +340,122 @@ function getMajoritySide(sides) {
 }
 
 // ============================================
-// AI HEADLINE GENERATION
+// LLM EDITORIAL CURATION
+// Sends ~40 candidates to the LLM. It selects 28, reorders, writes headlines,
+// and decides which are red. Returns fully curated market array.
 // ============================================
-async function generateHeadlines(markets) {
-  const userPrompt = buildHeadlineUserPrompt(markets);
+async function curateWithLLM(candidates) {
+  const userPrompt = buildEditorialUserPrompt(candidates);
+
+  // Build a lookup so we can reconstruct full market objects from LLM's picks
+  const candidateMap = new Map();
+  for (const m of candidates) {
+    candidateMap.set(String(m.id), m);
+  }
 
   for (const provider of AI_PROVIDERS) {
     const apiKey = process.env[provider.envKey];
     if (!apiKey) {
-      console.log(`AI provider ${provider.name}: no API key (${provider.envKey}), skipping`);
+      console.log(`AI curation ${provider.name}: no API key (${provider.envKey}), skipping`);
       continue;
     }
 
     try {
-      console.log(`Trying AI provider: ${provider.name}`);
+      console.log(`Trying AI curation via ${provider.name}...`);
+      const res = await fetch(provider.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
+            { role: 'system', content: EDITORIAL_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 4000,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error(`AI curation ${provider.name} returned ${res.status}: ${errText}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error(`AI curation ${provider.name}: empty response`);
+        continue;
+      }
+
+      const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
+      const picks = JSON.parse(cleaned);
+
+      if (!Array.isArray(picks) || picks.length === 0) {
+        console.error(`AI curation ${provider.name}: invalid response (not an array or empty)`);
+        continue;
+      }
+
+      // Reconstruct full market objects in the LLM's chosen order
+      const curated = [];
+      for (const pick of picks) {
+        const original = candidateMap.get(String(pick.id));
+        if (!original) {
+          console.log(`  LLM picked unknown id "${pick.id}", skipping`);
+          continue;
+        }
+        curated.push({
+          ...original,
+          headline: pick.headline || null,
+          isRed: !!pick.isRed,
+        });
+      }
+
+      if (curated.length < TOTAL_MARKETS * 0.5) {
+        console.error(`AI curation ${provider.name}: only matched ${curated.length}/${picks.length} IDs, too few`);
+        continue;
+      }
+
+      console.log(`AI curation via ${provider.name}: ${curated.length} markets curated (${curated.filter(m => m.isRed).length} red)`);
+      curated.slice(0, 5).forEach((m, i) => {
+        const red = m.isRed ? ' [RED]' : '';
+        console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
+      });
+
+      return curated.slice(0, TOTAL_MARKETS);
+    } catch (err) {
+      console.error(`AI curation ${provider.name} failed:`, err.message);
+      continue;
+    }
+  }
+
+  console.log('All AI providers failed for curation');
+  return null;
+}
+
+// ============================================
+// FALLBACK: Algorithmic ordering + headline-only LLM pass
+// Used when editorial curation fails entirely.
+// ============================================
+async function fallbackHeadlines(candidates) {
+  const displayed = candidates.slice(0, TOTAL_MARKETS);
+  const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
+  const scoreThreshold = displayed.length > 0 ? displayed[redCount]?.score || 0 : 0;
+
+  // Try headline-only LLM pass
+  const userPrompt = buildHeadlineUserPrompt(displayed);
+  let headlines = null;
+
+  for (const provider of AI_PROVIDERS) {
+    const apiKey = process.env[provider.envKey];
+    if (!apiKey) continue;
+
+    try {
+      console.log(`Fallback headlines via ${provider.name}...`);
       const res = await fetch(provider.url, {
         method: 'POST',
         headers: {
@@ -371,37 +473,28 @@ async function generateHeadlines(markets) {
         }),
       });
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        console.error(`AI provider ${provider.name} returned ${res.status}: ${errText}`);
-        continue;
-      }
-
+      if (!res.ok) continue;
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error(`AI provider ${provider.name}: empty response`);
-        continue;
-      }
+      if (!content) continue;
 
       const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      const headlines = JSON.parse(cleaned);
-
-      if (Array.isArray(headlines) && headlines.length === markets.length) {
-        console.log(`AI headlines generated via ${provider.name}`);
-        return headlines;
-      } else {
-        console.error(`AI provider ${provider.name}: expected ${markets.length} headlines, got ${headlines?.length}`);
-        continue;
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.length === displayed.length) {
+        headlines = parsed;
+        console.log(`Fallback headlines generated via ${provider.name}`);
+        break;
       }
     } catch (err) {
-      console.error(`AI provider ${provider.name} failed:`, err.message);
-      continue;
+      console.error(`Fallback headline ${provider.name} failed:`, err.message);
     }
   }
 
-  console.log('All AI providers failed, using raw market questions as headlines');
-  return null;
+  return displayed.map((m, i) => ({
+    ...m,
+    headline: headlines ? headlines[i] : null,
+    isRed: m.score >= scoreThreshold,
+  }));
 }
 
 // ============================================
@@ -437,15 +530,22 @@ export default async function handler(req, res) {
 
     console.log(`Total: ${allMarkets.length} markets, ${whaleTrades.length} whale trades`);
 
-    const ranked = rankMarkets(allMarkets, whaleTrades);
-    console.log(`Final: ${ranked.length} markets for display`);
+    // Phase 1: Algorithmic scoring → candidate pool (~42 markets)
+    const candidates = rankMarkets(allMarkets, whaleTrades);
+    console.log(`Candidate pool: ${candidates.length} markets`);
 
-    const headlines = await generateHeadlines(ranked);
+    // Phase 2: LLM editorial curation (select, reorder, headline, red-flag)
+    let markets = await curateWithLLM(candidates);
+    let aiMode = 'curated';
 
-    const markets = ranked.map((m, i) => ({
-      ...m,
-      headline: headlines ? headlines[i] : null,
-    }));
+    // Phase 2b: Fallback to algorithmic order + headline-only LLM
+    if (!markets) {
+      console.log('Falling back to algorithmic ordering + headline generation');
+      markets = await fallbackHeadlines(candidates);
+      aiMode = markets[0]?.headline ? 'headlines-only' : 'fallback';
+    }
+
+    console.log(`Final: ${markets.length} markets (mode: ${aiMode})`);
 
     const result = {
       markets,
@@ -454,7 +554,7 @@ export default async function handler(req, res) {
         tagIds: TAG_IDS.map(t => t.label),
         resolvedSlugs: (slugIdCache || []).map(t => `${t.slug}→${t.id}`),
         sources: { totalMarkets: allMarkets.length, whaleTrades: whaleTrades.length },
-        aiProvider: headlines ? 'active' : 'fallback',
+        aiProvider: aiMode,
       },
     };
 

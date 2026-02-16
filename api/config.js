@@ -29,6 +29,7 @@ export const AI_PROVIDERS = [
 // MARKET FETCHING
 // ============================================
 export const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
+export const LLM_CANDIDATE_POOL = 42;     // Send more to LLM so it can curate/drop
 export const WHALE_TRADE_THRESHOLD = 10000; // USD minimum for whale trade detection
 export const WHALE_LOOKBACK_MINUTES = 120;  // How far back to scan for whale trades
 
@@ -197,8 +198,85 @@ export const NOISE_PATTERNS = [
 ];
 
 // ============================================
-// AI HEADLINE PROMPT
+// AI EDITORIAL CURATION PROMPT
+// The LLM acts as editor-in-chief: it selects, orders, headlines, and flags.
 // ============================================
+export const EDITORIAL_SYSTEM_PROMPT = `You are the editor-in-chief of POLYMARKET REPORT, a prediction-market news aggregator in the style of the Drudge Report.
+
+You will receive ~40 candidate prediction markets, pre-scored by an algorithm. Your job is to make EDITORIAL DECISIONS:
+
+1. SELECT the ${TOTAL_MARKETS} most newsworthy markets. Drop boring, niche, or redundant ones.
+2. ORDER them by newsworthiness. Position 1 = the MAIN HEADLINE (biggest story right now).
+3. HEADLINE: Write a punchy Drudge-style headline for each selected market.
+4. RED FLAG: Mark 2-4 headlines as "red" (breaking / urgent / high-drama).
+
+EDITORIAL JUDGMENT — what makes a story worth leading with:
+- Real-world consequence: Wars, elections, Fed policy, investigations that affect millions
+- High stakes: Markets with massive volume ($1M+) signal that the world is paying attention
+- Breaking developments: Big price swings on CONSEQUENTIAL topics (not just any big swing)
+- Contrarian/whale signals: Smart money moving against the crowd
+- Political drama: Power struggles, resignations, indictments, scandal
+
+WHAT TO DEPRIORITIZE OR DROP:
+- "Will X happen by [specific near-term date]?" markets that are just clocks winding down
+- Niche markets with low real-world impact (product launch dates, turnout %, etc.)
+- Redundant markets: if multiple brackets cover the same event, pick the ONE most dramatic
+- Markets where the outcome is near-certain (>95% or <5%) UNLESS the certainty itself is the story
+- Procedural/technical markets (election turnout bands, SPX open direction, etc.)
+
+FACTUAL ACCURACY:
+- NEVER claim something happened just because the price moved. 92% ≠ confirmed.
+- resolved: true → the outcome IS fact. State it definitively.
+- resolved: false → frame as sentiment: "Bettors surge toward...", "Odds spike for...", "Market at X%..."
+- A price DROP on YES means the event is now LESS likely — don't invert this.
+- Read the description to understand what the market actually resolves on.
+- Whale trades: frame as "Smart money betting on..." — do NOT claim insider knowledge.
+
+HEADLINE STYLE:
+- Drudge Report energy: urgent, punchy, ALL-CAPS sparingly for emphasis
+- Under 80 characters
+- Active voice, present tense
+- Include odds when they add drama (e.g., "NOW AT 94%")
+- No question marks — declarations, not questions
+- No quotation marks wrapping the whole headline
+
+OUTPUT: Return a JSON array of exactly ${TOTAL_MARKETS} objects in your chosen display order:
+[
+  { "id": "market_id", "headline": "HEADLINE TEXT", "isRed": true },
+  { "id": "market_id", "headline": "HEADLINE TEXT", "isRed": false },
+  ...
+]
+Nothing else — no markdown, no explanation, no commentary.`;
+
+export function buildEditorialUserPrompt(markets) {
+  const entries = markets.map((m, i) => {
+    const parts = [
+      `[${i + 1}] id: "${m.id}"`,
+      `    Question: "${m.question}"`,
+      `    YES price: ${(m.bestYesPrice * 100).toFixed(1)}%`,
+      `    24h change: ${m.oneDayPriceChange >= 0 ? '+' : ''}${(m.oneDayPriceChange * 100).toFixed(1)}%`,
+      `    24h volume: $${Math.round(m.volume24hr || 0).toLocaleString()}`,
+      `    Algo score: ${m.score.toFixed(3)}`,
+      `    Expires: ${m.endDate || 'N/A'}`,
+      `    Featured: ${m.isFeatured ? 'YES' : 'no'}`,
+      `    ${m.resolved ? 'STATUS: RESOLVED — outcome is confirmed fact' : 'STATUS: UNRESOLVED — not yet determined'}`,
+    ];
+    if (m.description) {
+      const desc = m.description.length > 400
+        ? m.description.substring(0, 400) + '...'
+        : m.description;
+      parts.push(`    Resolution criteria: ${desc}`);
+    }
+    if (m.whaleSignal) {
+      parts.push(`    WHALE ALERT: ${m.whaleSignal}`);
+    }
+    return parts.join('\n');
+  });
+
+  return `Today's date: ${new Date().toISOString().split('T')[0]}\n\nHere are ${markets.length} candidate markets. Select the best ${TOTAL_MARKETS}, order by newsworthiness, write headlines, and flag 2-4 as red:\n\n${entries.join('\n\n')}`;
+}
+
+// Legacy headline-only prompt (used as fallback when LLM curation fails)
 export const HEADLINE_SYSTEM_PROMPT = `You are a headline writer for a prediction-market news aggregator styled after the Drudge Report.
 
 Your job: turn prediction market data into short, punchy, informative headlines that tell the reader what is ACTUALLY HAPPENING in the world right now.
@@ -238,7 +316,6 @@ export function buildHeadlineUserPrompt(markets) {
       parts.push(`   STATUS: UNRESOLVED — outcome is NOT yet determined`);
     }
     if (m.description) {
-      // Truncate long descriptions to keep prompt manageable
       const desc = m.description.length > 300
         ? m.description.substring(0, 300) + '...'
         : m.description;
