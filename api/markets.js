@@ -20,8 +20,6 @@ import {
   EXPIRY_DRIFT,
   EDITORIAL_SYSTEM_PROMPT,
   buildEditorialUserPrompt,
-  HEADLINE_SYSTEM_PROMPT,
-  buildHeadlineUserPrompt,
 } from './config.js';
 
 // ============================================
@@ -340,9 +338,8 @@ function getMajoritySide(sides) {
 }
 
 // ============================================
-// LLM EDITORIAL CURATION
-// Sends ~40 candidates to the LLM. It selects 28, reorders, writes headlines,
-// and decides which are red. Returns fully curated market array.
+// LLM EDITORIAL CURATION — Race all providers in parallel
+// First valid response wins. Logs timing for every provider.
 // ============================================
 async function curateWithLLM(candidates) {
   const userPrompt = buildEditorialUserPrompt(candidates);
@@ -353,151 +350,49 @@ async function curateWithLLM(candidates) {
     candidateMap.set(String(m.id), m);
   }
 
-  for (const provider of AI_PROVIDERS) {
-    const apiKey = process.env[provider.envKey];
-    if (!apiKey) {
-      console.log(`AI curation ${provider.name}: no API key (${provider.envKey}), skipping`);
-      continue;
-    }
+  // Filter to providers with API keys
+  const runnableProviders = AI_PROVIDERS.filter(p => {
+    const key = process.env[p.envKey];
+    if (!key) console.log(`AI curation ${p.name}: no API key (${p.envKey}), skipping`);
+    return !!key;
+  });
 
-    try {
-      console.log(`Trying AI curation via ${provider.name}...`);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 45_000);
-      const res = await fetch(provider.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: provider.model,
-          messages: [
-            { role: 'system', content: EDITORIAL_SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 4000,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        console.error(`AI curation ${provider.name} returned ${res.status}: ${errText}`);
-        continue;
-      }
-
-      const data = await res.json();
-      const content = data.choices?.[0]?.message?.content
-        || data.choices?.[0]?.message?.text        // some providers use 'text'
-        || data.choices?.[0]?.text                  // legacy completions format
-        || (typeof data.result === 'string' ? data.result : null);
-      if (!content) {
-        const msg = data.choices?.[0]?.message;
-        console.error(`AI curation ${provider.name}: empty response. ` +
-          `content type=${typeof msg?.content}, value=${JSON.stringify(msg?.content)}. ` +
-          `reasoning_content type=${typeof msg?.reasoning_content}, value=${JSON.stringify(msg?.reasoning_content)?.substring(0, 300)}. ` +
-          `finish_reason=${JSON.stringify(data.choices?.[0]?.finish_reason)}` +
-          (data.error ? `. Error: ${JSON.stringify(data.error)}` : ''));
-        continue;
-      }
-
-      const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      let picks = JSON.parse(cleaned);
-
-      // Some models wrap the array in an object — unwrap it
-      if (picks && !Array.isArray(picks) && typeof picks === 'object') {
-        const arrVal = Object.values(picks).find(v => Array.isArray(v));
-        if (arrVal) picks = arrVal;
-      }
-
-      if (!Array.isArray(picks) || picks.length === 0) {
-        console.error(`AI curation ${provider.name}: invalid response (not an array or empty)`);
-        continue;
-      }
-
-      // Reconstruct full market objects in the LLM's chosen order
-      const curated = [];
-      for (const pick of picks) {
-        const original = candidateMap.get(String(pick.id));
-        if (!original) {
-          console.log(`  LLM picked unknown id "${pick.id}", skipping`);
-          continue;
-        }
-        curated.push({
-          ...original,
-          headline: pick.headline || null,
-          isRed: !!pick.isRed,
-        });
-      }
-
-      if (curated.length < TOTAL_MARKETS * 0.5) {
-        console.error(`AI curation ${provider.name}: only matched ${curated.length}/${picks.length} IDs, too few`);
-        continue;
-      }
-
-      console.log(`AI curation via ${provider.name}: ${curated.length} markets curated (${curated.filter(m => m.isRed).length} red)`);
-      curated.slice(0, 5).forEach((m, i) => {
-        const red = m.isRed ? ' [RED]' : '';
-        console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
-      });
-
-      return curated.slice(0, TOTAL_MARKETS);
-    } catch (err) {
-      console.error(`AI curation ${provider.name} failed:`, err.message);
-      continue;
-    }
+  if (runnableProviders.length === 0) {
+    console.log('No AI providers configured');
+    return null;
   }
 
-  console.log('All AI providers failed for curation');
-  return null;
-}
+  console.log(`Racing ${runnableProviders.length} AI providers in parallel...`);
 
-// ============================================
-// FALLBACK: Algorithmic ordering + headline-only LLM pass
-// Used when editorial curation fails entirely.
-// ============================================
-async function fallbackHeadlines(candidates) {
-  const displayed = candidates.slice(0, TOTAL_MARKETS);
-  const redCount = Math.floor(displayed.length * RED_THRESHOLDS.topPercentile);
-  const scoreThreshold = displayed.length > 0 ? displayed[redCount]?.score || 0 : 0;
-
-  // Try headline-only LLM pass
-  const userPrompt = buildHeadlineUserPrompt(displayed);
-  let headlines = null;
-
-  for (const provider of AI_PROVIDERS) {
+  // Race: fire all providers at once, first valid parse wins
+  const raceResults = runnableProviders.map(provider => {
     const apiKey = process.env[provider.envKey];
-    if (!apiKey) continue;
+    const t0 = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 50_000);
 
-    try {
-      console.log(`Fallback headlines via ${provider.name}...`);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 25_000);
-      const res = await fetch(provider.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: provider.model,
-          messages: [
-            { role: 'system', content: HEADLINE_SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          temperature: 0.7,
-          max_tokens: 3000,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
+    return fetch(provider.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: 'system', content: EDITORIAL_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      }),
+      signal: controller.signal,
+    })
+    .then(async res => {
+      const elapsed = Date.now() - t0;
       if (!res.ok) {
-        console.error(`Fallback headline ${provider.name} returned ${res.status}`);
-        continue;
+        const errText = await res.text().catch(() => '');
+        throw new Error(`${res.status}: ${errText}`);
       }
       const data = await res.json();
       const content = data.choices?.[0]?.message?.content
@@ -506,38 +401,67 @@ async function fallbackHeadlines(candidates) {
         || (typeof data.result === 'string' ? data.result : null);
       if (!content) {
         const msg = data.choices?.[0]?.message;
-        console.error(`Fallback headline ${provider.name}: empty response. ` +
-          `content type=${typeof msg?.content}, value=${JSON.stringify(msg?.content)}. ` +
-          `reasoning_content type=${typeof msg?.reasoning_content}, value=${JSON.stringify(msg?.reasoning_content)?.substring(0, 300)}. ` +
-          `finish_reason=${JSON.stringify(data.choices?.[0]?.finish_reason)}` +
-          (data.error ? `. Error: ${JSON.stringify(data.error)}` : ''));
+        throw new Error(
+          `empty response. finish_reason=${data.choices?.[0]?.finish_reason}` +
+          `, reasoning_content length=${(msg?.reasoning_content || '').length}`
+        );
+      }
+      const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
+      let picks = JSON.parse(cleaned);
+      if (picks && !Array.isArray(picks) && typeof picks === 'object') {
+        const arrVal = Object.values(picks).find(v => Array.isArray(v));
+        if (arrVal) picks = arrVal;
+      }
+      if (!Array.isArray(picks) || picks.length === 0) {
+        throw new Error('invalid JSON (not an array or empty)');
+      }
+      console.log(`  ${provider.name}: responded in ${(elapsed / 1000).toFixed(1)}s (${picks.length} picks)`);
+      return { provider, picks, elapsed };
+    })
+    .catch(err => {
+      clearTimeout(timeout);
+      const elapsed = Date.now() - t0;
+      console.error(`  ${provider.name}: failed in ${(elapsed / 1000).toFixed(1)}s — ${err.message}`);
+      throw err; // re-throw so Promise.any skips it
+    })
+    .finally(() => clearTimeout(timeout));
+  });
+
+  try {
+    const { provider, picks, elapsed } = await Promise.any(raceResults);
+
+    // Reconstruct full market objects in the LLM's chosen order
+    const curated = [];
+    for (const pick of picks) {
+      const original = candidateMap.get(String(pick.id));
+      if (!original) {
+        console.log(`  LLM picked unknown id "${pick.id}", skipping`);
         continue;
       }
-
-      const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-      let parsed = JSON.parse(cleaned);
-
-      // Unwrap if model wrapped the array in an object
-      if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
-        const arrVal = Object.values(parsed).find(v => Array.isArray(v));
-        if (arrVal) parsed = arrVal;
-      }
-
-      if (Array.isArray(parsed) && parsed.length === displayed.length) {
-        headlines = parsed;
-        console.log(`Fallback headlines generated via ${provider.name}`);
-        break;
-      }
-    } catch (err) {
-      console.error(`Fallback headline ${provider.name} failed:`, err.message);
+      curated.push({
+        ...original,
+        headline: pick.headline || null,
+        isRed: !!pick.isRed,
+      });
     }
-  }
 
-  return displayed.map((m, i) => ({
-    ...m,
-    headline: headlines ? headlines[i] : null,
-    isRed: m.score >= scoreThreshold,
-  }));
+    if (curated.length < TOTAL_MARKETS * 0.5) {
+      console.error(`AI curation ${provider.name}: only matched ${curated.length}/${picks.length} IDs, too few`);
+      return null;
+    }
+
+    console.log(`AI curation winner: ${provider.name} in ${(elapsed / 1000).toFixed(1)}s — ${curated.length} markets (${curated.filter(m => m.isRed).length} red)`);
+    curated.slice(0, 5).forEach((m, i) => {
+      const red = m.isRed ? ' [RED]' : '';
+      console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
+    });
+
+    return curated.slice(0, TOTAL_MARKETS);
+  } catch {
+    // All providers rejected
+    console.log('All AI providers failed');
+    return null;
+  }
 }
 
 // ============================================
@@ -577,15 +501,19 @@ export default async function handler(req, res) {
     const candidates = rankMarkets(allMarkets, whaleTrades);
     console.log(`Candidate pool: ${candidates.length} markets`);
 
-    // Phase 2: LLM editorial curation (select, reorder, headline, red-flag)
+    // Phase 2: LLM editorial curation (race all providers in parallel)
     let markets = await curateWithLLM(candidates);
     let aiMode = 'curated';
 
-    // Phase 2b: Fallback to algorithmic order + headline-only LLM
+    // If all LLMs failed, fall back to algorithmic order with no headlines
     if (!markets) {
-      console.log('Falling back to algorithmic ordering + headline generation');
-      markets = await fallbackHeadlines(candidates);
-      aiMode = markets[0]?.headline ? 'headlines-only' : 'fallback';
+      console.log('All AI providers failed — using algorithmic order');
+      markets = candidates.slice(0, TOTAL_MARKETS).map((m, i) => ({
+        ...m,
+        headline: null,
+        isRed: i < Math.floor(TOTAL_MARKETS * RED_THRESHOLDS.topPercentile),
+      }));
+      aiMode = 'fallback';
     }
 
     console.log(`Final: ${markets.length} markets (mode: ${aiMode})`);
