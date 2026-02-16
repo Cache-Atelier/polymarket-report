@@ -73,10 +73,28 @@ export const TAG_SLUGS = [
 // RANKING WEIGHTS
 // ============================================
 export const WEIGHTS = {
-  priceChange: 0.40,   // Big price moves = something happened
-  volume: 0.25,        // High volume = market cares
+  volume: 0.35,        // High volume = the world cares (best proxy for newsworthiness)
+  priceChange: 0.25,   // Big price moves = something happened
   whale: 0.25,         // Whale/contrarian bets = insider signal
   newTrending: 0.10,   // New markets gaining traction
+  featuredBoost: 1.25, // Multiplier for Polymarket editorial picks
+};
+
+// ============================================
+// SCORING ADJUSTMENTS
+// ============================================
+// Volume floor: markets below this threshold get a penalty.
+// A $10K market with a big swing is just illiquid, not news.
+export const VOLUME_FLOOR = 25_000;       // USD
+export const VOLUME_FLOOR_PENALTY = 0.4;  // Score multiplied by this when below floor
+
+// Expiry drift: markets near deadline naturally swing to 0% or 100%.
+// That's not news — it's just a clock running out. Dampen those.
+export const EXPIRY_DRIFT = {
+  daysThreshold: 7,         // Market expires within this many days
+  priceExtremeBelow: 0.15,  // YES price below 15%...
+  priceExtremeAbove: 0.85,  // ...or above 85%
+  dampener: 0.3,            // Price signal multiplied by this
 };
 
 // ============================================

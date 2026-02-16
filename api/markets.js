@@ -14,6 +14,9 @@ import {
   RED_THRESHOLDS,
   CACHE_TTL_MS,
   NOISE_PATTERNS,
+  VOLUME_FLOOR,
+  VOLUME_FLOOR_PENALTY,
+  EXPIRY_DRIFT,
   HEADLINE_SYSTEM_PROMPT,
   buildHeadlineUserPrompt,
 } from './config.js';
@@ -223,19 +226,46 @@ function rankMarkets(allMarkets, whaleTrades) {
     const id = m.id || m.conditionId;
     const whale = whaleIndex[id];
 
-    const priceSignal = m._absPriceChange / maxAbsChange;
+    let priceSignal = m._absPriceChange / maxAbsChange;
     const volumeSignal = (m.volume24hr || 0) / maxVolume;
     const whaleSignal = whale ? Math.min(whale.count / 3, 1) : 0;
     const newTrendingSignal = isNewAndTrending(m) ? 1 : 0;
 
-    m._score = (priceSignal * WEIGHTS.priceChange)
-             + (volumeSignal * WEIGHTS.volume)
+    // Expiry drift dampener: markets near deadline naturally resolve toward
+    // 0% or 100%. A big price swing there isn't news — it's just a clock
+    // running out. Dampen the price signal for these.
+    if (m.endDate) {
+      const daysToExpiry = (new Date(m.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+      let yesPrice = 0.5;
+      try {
+        if (m.outcomePrices) {
+          const prices = typeof m.outcomePrices === 'string'
+            ? JSON.parse(m.outcomePrices) : m.outcomePrices;
+          yesPrice = parseFloat(prices[0]) || 0.5;
+        } else if (m.bestBid != null) {
+          yesPrice = m.bestBid;
+        }
+      } catch { /* use default */ }
+
+      if (daysToExpiry <= EXPIRY_DRIFT.daysThreshold
+          && (yesPrice < EXPIRY_DRIFT.priceExtremeBelow || yesPrice > EXPIRY_DRIFT.priceExtremeAbove)) {
+        priceSignal *= EXPIRY_DRIFT.dampener;
+      }
+    }
+
+    m._score = (volumeSignal * WEIGHTS.volume)
+             + (priceSignal * WEIGHTS.priceChange)
              + (whaleSignal * WEIGHTS.whale)
              + (newTrendingSignal * WEIGHTS.newTrending);
 
+    // Volume floor: a big swing in a tiny market is illiquidity, not news
+    if ((m.volume24hr || 0) < VOLUME_FLOOR) {
+      m._score *= VOLUME_FLOOR_PENALTY;
+    }
+
     // Featured boost: Polymarket's editorial picks
     if (m._isFeatured) {
-      m._score *= 1.25;
+      m._score *= WEIGHTS.featuredBoost;
     }
 
     if (whale) {
