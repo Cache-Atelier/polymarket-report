@@ -23,7 +23,7 @@ export const AI_PROVIDERS = [
 // MARKET FETCHING
 // ============================================
 export const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
-export const LLM_CANDIDATE_POOL = 42;     // Send more to LLM so it can curate/drop
+export const LLM_CANDIDATE_POOL = 35;     // Send more to LLM so it can curate/drop
 export const WHALE_TRADE_THRESHOLD = 10000; // USD minimum for whale trade detection
 export const WHALE_LOOKBACK_MINUTES = 120;  // How far back to scan for whale trades
 
@@ -256,8 +256,8 @@ export function buildEditorialUserPrompt(markets) {
       `    ${m.resolved ? 'STATUS: RESOLVED — outcome is confirmed fact' : 'STATUS: UNRESOLVED — not yet determined'}`,
     ];
     if (m.description) {
-      const desc = m.description.length > 400
-        ? m.description.substring(0, 400) + '...'
+      const desc = m.description.length > 200
+        ? m.description.substring(0, 200) + '...'
         : m.description;
       parts.push(`    Resolution criteria: ${desc}`);
     }
