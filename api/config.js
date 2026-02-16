@@ -12,12 +12,6 @@ export const DATA_API = 'https://data-api.polymarket.com';
 // ============================================
 export const AI_PROVIDERS = [
   {
-    name: 'opencode-glm',
-    url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'glm-4.7-free',
-    envKey: 'OPENCODE_API_KEY',
-  },
-  {
     name: 'opencode-minimax',
     url: 'https://opencode.ai/zen/v1/chat/completions',
     model: 'minimax-m2.5-free',
@@ -27,6 +21,12 @@ export const AI_PROVIDERS = [
     name: 'opencode-kimi',
     url: 'https://opencode.ai/zen/v1/chat/completions',
     model: 'kimi-k2.5-free',
+    envKey: 'OPENCODE_API_KEY',
+  },
+  {
+    name: 'opencode-glm',
+    url: 'https://opencode.ai/zen/v1/chat/completions',
+    model: 'glm-4.7-free',
     envKey: 'OPENCODE_API_KEY',
   },
 ];
@@ -207,79 +207,27 @@ export const NOISE_PATTERNS = [
 // AI EDITORIAL CURATION PROMPT
 // The LLM acts as editor-in-chief: it selects, orders, headlines, and flags.
 // ============================================
-export const EDITORIAL_SYSTEM_PROMPT = `You are the editor-in-chief of POLYMARKET REPORT, a prediction-market news aggregator in the style of the Drudge Report.
+export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of POLYMARKET REPORT, a Drudge Report-style prediction market news site.
 
-You will receive ~40 candidate prediction markets, pre-scored by an algorithm. Your job is to make EDITORIAL DECISIONS:
+TASK: From ~35 markets, pick ${TOTAL_MARKETS}, rank by newsworthiness, write headlines, flag 2-4 as red.
 
-1. SELECT the ${TOTAL_MARKETS} most newsworthy markets. Drop boring, niche, or redundant ones.
-2. ORDER them by newsworthiness. Position 1 = the MAIN HEADLINE (biggest story right now).
-3. HEADLINE: Write a punchy Drudge-style headline for each selected market.
-4. RED FLAG: Mark 2-4 headlines as "red" (breaking / urgent / high-drama).
+HEADLINES: Under 80 chars. Punchy, active voice, present tense. ALL-CAPS sparingly.
+- High odds ≠ confirmed. Say "AT 94%" or "Odds surge..." — never claim it happened.
+- Price DROP on YES = event LESS likely. Don't invert.
+- Include odds when dramatic. No question marks.
 
-EDITORIAL JUDGMENT — what makes a story worth leading with:
-- Real-world consequence: Wars, elections, Fed policy, investigations that affect millions
-- High stakes: Markets with massive volume ($1M+) signal that the world is paying attention
-- Breaking developments: Big price swings on CONSEQUENTIAL topics (not just any big swing)
-- Contrarian/whale signals: Smart money moving against the crowd
-- Political drama: Power struggles, resignations, indictments, scandal
+PICK the biggest real-world stories. DROP niche, redundant, or near-certain markets.
 
-WHAT TO DEPRIORITIZE OR DROP:
-- "Will X happen by [specific near-term date]?" markets that are just clocks winding down
-- Niche markets with low real-world impact (product launch dates, turnout %, etc.)
-- Redundant markets: if multiple brackets cover the same event, pick the ONE most dramatic
-- Markets where the outcome is near-certain (>95% or <5%) UNLESS the certainty itself is the story
-- Procedural/technical markets (election turnout bands, SPX open direction, etc.)
-
-FACTUAL ACCURACY:
-- NEVER claim something happened just because the price moved. 92% ≠ confirmed.
-- resolved: true → the outcome IS fact. State it definitively.
-- resolved: false → frame as sentiment: "Bettors surge toward...", "Odds spike for...", "Market at X%..."
-- A price DROP on YES means the event is now LESS likely — don't invert this.
-- Read the description to understand what the market actually resolves on.
-- Whale trades: frame as "Smart money betting on..." — do NOT claim insider knowledge.
-
-HEADLINE STYLE:
-- Drudge Report energy: urgent, punchy, ALL-CAPS sparingly for emphasis
-- Under 80 characters
-- Active voice, present tense
-- Include odds when they add drama (e.g., "NOW AT 94%")
-- No question marks — declarations, not questions
-- No quotation marks wrapping the whole headline
-
-OUTPUT: Return a JSON array of exactly ${TOTAL_MARKETS} objects in your chosen display order:
-[
-  { "id": "market_id", "headline": "HEADLINE TEXT", "isRed": true },
-  { "id": "market_id", "headline": "HEADLINE TEXT", "isRed": false },
-  ...
-]
-Nothing else — no markdown, no explanation, no commentary.`;
+OUTPUT: JSON array only, no markdown/commentary:
+[{"id":"market_id","headline":"TEXT","isRed":true},...]`;
 
 export function buildEditorialUserPrompt(markets) {
-  const entries = markets.map((m, i) => {
-    const parts = [
-      `[${i + 1}] id: "${m.id}"`,
-      `    Question: "${m.question}"`,
-      `    YES price: ${(m.bestYesPrice * 100).toFixed(1)}%`,
-      `    24h change: ${m.oneDayPriceChange >= 0 ? '+' : ''}${(m.oneDayPriceChange * 100).toFixed(1)}%`,
-      `    24h volume: $${Math.round(m.volume24hr || 0).toLocaleString()}`,
-      `    Algo score: ${m.score.toFixed(3)}`,
-      `    Expires: ${m.endDate || 'N/A'}`,
-      `    Featured: ${m.isFeatured ? 'YES' : 'no'}`,
-      `    ${m.resolved ? 'STATUS: RESOLVED — outcome is confirmed fact' : 'STATUS: UNRESOLVED — not yet determined'}`,
-    ];
-    if (m.description) {
-      const desc = m.description.length > 200
-        ? m.description.substring(0, 200) + '...'
-        : m.description;
-      parts.push(`    Resolution criteria: ${desc}`);
-    }
-    if (m.whaleSignal) {
-      parts.push(`    WHALE ALERT: ${m.whaleSignal}`);
-    }
-    return parts.join('\n');
+  const lines = markets.map(m => {
+    const chg = m.oneDayPriceChange >= 0 ? '+' : '';
+    return `${m.id} | ${m.question} | ${(m.bestYesPrice * 100).toFixed(0)}% YES | ${chg}${(m.oneDayPriceChange * 100).toFixed(1)}% 24h | $${Math.round(m.volume24hr || 0).toLocaleString()} vol`;
   });
 
-  return `Today's date: ${new Date().toISOString().split('T')[0]}\n\nHere are ${markets.length} candidate markets. Select the best ${TOTAL_MARKETS}, order by newsworthiness, write headlines, and flag 2-4 as red:\n\n${entries.join('\n\n')}`;
+  return `Pick ${TOTAL_MARKETS}, rank, headline, flag 2-4 red:\n\n${lines.join('\n')}`;
 }
 
 // Legacy headline-only prompt (used as fallback when LLM curation fails)

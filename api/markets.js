@@ -377,7 +377,7 @@ async function curateWithLLM(candidates) {
             { role: 'user', content: userPrompt },
           ],
           temperature: 0.7,
-          max_tokens: 8000,
+          max_tokens: 4000,
         }),
         signal: controller.signal,
       });
@@ -475,7 +475,7 @@ async function fallbackHeadlines(candidates) {
     try {
       console.log(`Fallback headlines via ${provider.name}...`);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
+      const timeout = setTimeout(() => controller.abort(), 25_000);
       const res = await fetch(provider.url, {
         method: 'POST',
         headers: {
@@ -489,7 +489,7 @@ async function fallbackHeadlines(candidates) {
             { role: 'user', content: userPrompt },
           ],
           temperature: 0.7,
-          max_tokens: 8000,
+          max_tokens: 3000,
         }),
         signal: controller.signal,
       });
