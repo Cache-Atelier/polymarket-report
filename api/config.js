@@ -23,6 +23,12 @@ export const AI_PROVIDERS = [
     model: 'minimax-m2.5-free',
     envKey: 'OPENCODE_API_KEY',
   },
+  {
+    name: 'opencode-kimi',
+    url: 'https://opencode.ai/zen/v1/chat/completions',
+    model: 'kimi-k2.5-free',
+    envKey: 'OPENCODE_API_KEY',
+  },
 ];
 
 // ============================================
