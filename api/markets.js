@@ -395,9 +395,11 @@ async function curateWithLLM(candidates) {
         || data.choices?.[0]?.text                  // legacy completions format
         || (typeof data.result === 'string' ? data.result : null);
       if (!content) {
-        console.error(`AI curation ${provider.name}: empty response. Keys: ${JSON.stringify(Object.keys(data))}` +
-          (data.choices?.[0] ? `. Choice keys: ${JSON.stringify(Object.keys(data.choices[0]))}` : '') +
-          (data.choices?.[0]?.message ? `. Message keys: ${JSON.stringify(Object.keys(data.choices[0].message))}` : '') +
+        const msg = data.choices?.[0]?.message;
+        console.error(`AI curation ${provider.name}: empty response. ` +
+          `content type=${typeof msg?.content}, value=${JSON.stringify(msg?.content)}. ` +
+          `reasoning_content type=${typeof msg?.reasoning_content}, value=${JSON.stringify(msg?.reasoning_content)?.substring(0, 300)}. ` +
+          `finish_reason=${JSON.stringify(data.choices?.[0]?.finish_reason)}` +
           (data.error ? `. Error: ${JSON.stringify(data.error)}` : ''));
         continue;
       }
@@ -503,7 +505,11 @@ async function fallbackHeadlines(candidates) {
         || data.choices?.[0]?.text
         || (typeof data.result === 'string' ? data.result : null);
       if (!content) {
-        console.error(`Fallback headline ${provider.name}: empty response. Keys: ${JSON.stringify(Object.keys(data))}` +
+        const msg = data.choices?.[0]?.message;
+        console.error(`Fallback headline ${provider.name}: empty response. ` +
+          `content type=${typeof msg?.content}, value=${JSON.stringify(msg?.content)}. ` +
+          `reasoning_content type=${typeof msg?.reasoning_content}, value=${JSON.stringify(msg?.reasoning_content)?.substring(0, 300)}. ` +
+          `finish_reason=${JSON.stringify(data.choices?.[0]?.finish_reason)}` +
           (data.error ? `. Error: ${JSON.stringify(data.error)}` : ''));
         continue;
       }
