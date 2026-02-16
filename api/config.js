@@ -12,6 +12,12 @@ export const DATA_API = 'https://data-api.polymarket.com';
 // ============================================
 export const AI_PROVIDERS = [
   {
+    name: 'groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.3-70b-versatile',
+    envKey: 'GROQ_API_KEY',
+  },
+  {
     name: 'opencode-zen',
     url: 'https://opencode.ai/zen/v1/chat/completions',
     model: 'minimax-m2.5-free',
