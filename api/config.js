@@ -14,14 +14,8 @@ export const AI_PROVIDERS = [
   {
     name: 'opencode-zen',
     url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'opencode/kimi-k2.5-free',
+    model: 'minimax-m2.5-free',
     envKey: 'OPENCODE_API_KEY',
-  },
-  {
-    name: 'nvidia-nim',
-    url: 'https://integrate.api.nvidia.com/v1/chat/completions',
-    model: 'moonshotai/kimi-k2.5',
-    envKey: 'NVIDIA_API_KEY',
   },
 ];
 
