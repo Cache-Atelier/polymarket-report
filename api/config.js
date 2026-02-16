@@ -12,7 +12,13 @@ export const DATA_API = 'https://data-api.polymarket.com';
 // ============================================
 export const AI_PROVIDERS = [
   {
-    name: 'opencode-zen',
+    name: 'opencode-glm',
+    url: 'https://opencode.ai/zen/v1/chat/completions',
+    model: 'glm-4.7-free',
+    envKey: 'OPENCODE_API_KEY',
+  },
+  {
+    name: 'opencode-minimax',
     url: 'https://opencode.ai/zen/v1/chat/completions',
     model: 'minimax-m2.5-free',
     envKey: 'OPENCODE_API_KEY',
