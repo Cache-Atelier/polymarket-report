@@ -2,13 +2,7 @@
   "functions": {
     "api/markets.js": {
       "memory": 1024,
-      "maxDuration": 300
+      "maxDuration": 60
     }
-  },
-  "crons": [
-    {
-      "path": "/api/markets",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  }
 }
