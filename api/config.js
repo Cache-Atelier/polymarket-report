@@ -136,8 +136,10 @@ export const NOISE_PATTERNS = [
   /\b(AAPL|MSFT|GOOGL|GOOG|AMZN|TSLA|NVDA|META|NFLX|AMD|INTC|CRM|ORCL|UBER|ABNB|COIN|PLTR|RIVN|LCID)\b.*\b(price|above|below|close|reach|hit|trade)\b/i,
   /\b(gold|silver|crude oil|natural gas|WTI|Brent|copper|platinum)\b.*\b(price|above|below|per ounce|per barrel|close)\b/i,
 
-  // ---- WEATHER ----
-  /\b(temperature|snowfall|rainfall|inches of (rain|snow)|high of \d|low of \d|degrees? (fahrenheit|celsius|f\b|c\b)|weather forecast)\b/i,
+  // ---- WEATHER (trivial daily forecasts — bot-heavy) ----
+  // Keep blocking temperature thresholds and degree markets (bot volume).
+  // Allow through storms, snow, precipitation, and other newsworthy weather.
+  /\b(temperature|high of \d|low of \d|degrees? (fahrenheit|celsius|f\b|c\b)|weather forecast)\b/i,
 
   // ---- SPORTS: LEAGUES & ORGANIZATIONS ----
   /\b(nfl|nba|mlb|nhl|mls|ncaa|wnba|ufc|wwe|pga|atp|wta|nascar|f1|formula (1|one)|premier league|champions league|la liga|serie a|bundesliga|ligue 1|eredivisie|cricket|ipl|afl|lpga|xfl|usfl|cfl|liga mx|copa libertadores|europa league|conference league|fa cup|carabao cup|efl|ligue 2|serie b|segunda division|j.league|k.league|a.league)\b/i,
