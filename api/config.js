@@ -202,16 +202,31 @@ export const NOISE_PATTERNS = [
 // AI EDITORIAL CURATION PROMPT
 // The LLM acts as editor-in-chief: it selects, orders, headlines, and flags.
 // ============================================
-export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of POLYMARKET REPORT, a Drudge Report-style prediction market news site.
+export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of a Drudge Report-style news site. Your source data comes from prediction markets, but YOUR HEADLINES READ LIKE REAL NEWS. Readers should never feel like they're looking at a betting site.
 
-TASK: From ~35 markets, pick ${TOTAL_MARKETS}, rank by newsworthiness, write headlines, flag 2-4 as red.
+TASK: From ~35 candidates, pick ${TOTAL_MARKETS}, rank by newsworthiness, write headlines, flag 2-4 as red.
 
-HEADLINES: Under 80 chars. Punchy, active voice, present tense. ALL-CAPS sparingly.
-- High odds ≠ confirmed. Say "AT 94%" or "Odds surge..." — never claim it happened.
-- Price DROP on YES = event LESS likely. Don't invert.
-- Include odds when dramatic. No question marks.
+HEADLINE RULES:
+- Under 80 characters. Punchy, active voice, present tense. ALL-CAPS sparingly.
+- Write about what is HAPPENING IN THE WORLD. Not about markets, odds, prices, bets, traders, or money.
+- NEVER include percentages, odds, probabilities, or any numbers about market prices.
+- The frontend automatically appends a movement indicator — do NOT include one.
+- No question marks. These are declarative news headlines.
+- If a market is unresolved, frame as developing news: "TENSIONS MOUNT...", "TALKS STALL...", "GROWING SIGNS OF..."
+- If resolved, state the outcome as fact.
 
-PICK the biggest real-world stories. DROP niche, redundant, or near-certain markets.
+LEAD STORY (#1):
+- Must be the most DYNAMIC story — something that CHANGED today.
+- Big movement or significant real-world developments.
+- A market sitting still, even at a dramatic price, is NEVER the lead.
+
+RED FLAGS (2-4 total):
+- Mark the most urgent, dramatic, or breaking stories as red.
+
+WHAT TO DROP:
+- Niche or low-interest stories
+- Markets with near-zero movement and no notable activity
+- If an event has multiple related markets (noted as "eventGroup: N"), write one headline about the broader event, not the specific sub-market
 
 OUTPUT: JSON array only, no markdown/commentary:
 [{"id":"market_id","headline":"TEXT","isRed":true},...]`;
@@ -219,7 +234,21 @@ OUTPUT: JSON array only, no markdown/commentary:
 export function buildEditorialUserPrompt(markets) {
   const lines = markets.map(m => {
     const chg = m.oneDayPriceChange >= 0 ? '+' : '';
-    return `${m.id} | ${m.question} | ${(m.bestYesPrice * 100).toFixed(0)}% YES | ${chg}${(m.oneDayPriceChange * 100).toFixed(1)}% 24h | $${Math.round(m.volume24hr || 0).toLocaleString()} vol`;
+    const parts = [
+      m.id,
+      m.question,
+      `${chg}${(m.oneDayPriceChange * 100).toFixed(1)}% 24h`,
+      `$${Math.round(m.volume24hr || 0).toLocaleString()} vol`,
+    ];
+    if (m.whaleSignal) parts.push(`WHALE: ${m.whaleSignal}`);
+    if (m.eventGroupSize > 1) parts.push(`eventGroup: ${m.eventGroupSize} markets`);
+    if (m.description) {
+      const desc = m.description.length > 150
+        ? m.description.substring(0, 150) + '...'
+        : m.description;
+      parts.push(`context: ${desc}`);
+    }
+    return parts.join(' | ');
   });
 
   return `Pick ${TOTAL_MARKETS}, rank, headline, flag 2-4 red:\n\n${lines.join('\n')}`;

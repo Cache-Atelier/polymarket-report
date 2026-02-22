@@ -264,6 +264,11 @@ function rankMarkets(allMarkets, whaleTrades) {
       m._score *= VOLUME_FLOOR_PENALTY;
     }
 
+    // Stale market penalty: no movement + no whale = not newsworthy
+    if (Math.abs(m.oneDayPriceChange || 0) < 0.005 && !whale) {
+      m._score *= 0.5;
+    }
+
     // Featured boost: Polymarket's editorial picks
     if (m._isFeatured) {
       m._score *= WEIGHTS.featuredBoost;
@@ -276,11 +281,35 @@ function rankMarkets(allMarkets, whaleTrades) {
     }
   }
 
-  // Sort by composite score, take top N (larger pool for LLM curation)
+  // Sort by composite score
   scorable.sort((a, b) => b._score - a._score);
 
-  const poolSize = Math.min(scorable.length, LLM_CANDIDATE_POOL);
-  const candidates = scorable.slice(0, poolSize);
+  // Event-level dedup: keep one representative per eventSlug
+  const eventSeen = new Map(); // eventSlug → { rep, count }
+  const deduped = [];
+  for (const m of scorable) {
+    const eSlug = m.events?.[0]?.slug || m.eventSlug || m.slug;
+    if (eventSeen.has(eSlug)) {
+      // Already have a rep for this event — just bump the count
+      eventSeen.get(eSlug).count++;
+      // Steal whale signal if this sibling has one and the rep doesn't
+      if (m.whaleSignal && !eventSeen.get(eSlug).rep.whaleSignal) {
+        eventSeen.get(eSlug).rep.whaleSignal = m.whaleSignal;
+        eventSeen.get(eSlug).rep._whaleInfo = m._whaleInfo;
+      }
+      continue;
+    }
+    eventSeen.set(eSlug, { rep: m, count: 1 });
+    deduped.push(m);
+  }
+  // Tag representatives with their group size
+  for (const { rep, count } of eventSeen.values()) {
+    rep._eventGroupSize = count;
+  }
+  console.log(`Event dedup: ${scorable.length} → ${deduped.length} markets (${scorable.length - deduped.length} dupes removed)`);
+
+  const poolSize = Math.min(deduped.length, LLM_CANDIDATE_POOL);
+  const candidates = deduped.slice(0, poolSize);
 
   // Log top candidates
   console.log(`Candidate pool: ${candidates.length} markets for LLM curation`);
@@ -317,6 +346,7 @@ function rankMarkets(allMarkets, whaleTrades) {
       whaleSignal: m.whaleSignal || null,
       isFeatured: !!m._isFeatured,
       score: Math.round(m._score * 1000) / 1000,
+      eventGroupSize: m._eventGroupSize || 1,
     };
   });
 }
