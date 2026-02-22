@@ -242,12 +242,6 @@ export function buildEditorialUserPrompt(markets) {
     ];
     if (m.whaleSignal) parts.push(`WHALE: ${m.whaleSignal}`);
     if (m.eventGroupSize > 1) parts.push(`eventGroup: ${m.eventGroupSize} markets`);
-    if (m.description) {
-      const desc = m.description.length > 150
-        ? m.description.substring(0, 150) + '...'
-        : m.description;
-      parts.push(`context: ${desc}`);
-    }
     return parts.join(' | ');
   });
 

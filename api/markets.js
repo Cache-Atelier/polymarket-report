@@ -392,14 +392,14 @@ async function curateWithLLM(candidates) {
     return null;
   }
 
-  console.log(`Racing ${runnableProviders.length} AI providers in parallel...`);
+  console.log(`Racing ${runnableProviders.length} AI providers in parallel (prompt: ${userPrompt.length} chars)...`);
 
   // Race: fire all providers at once, first valid parse wins
   const raceResults = runnableProviders.map(provider => {
     const apiKey = process.env[provider.envKey];
     const t0 = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 50_000);
+    const timeout = setTimeout(() => controller.abort(), 55_000);
 
     return fetch(provider.url, {
       method: 'POST',
