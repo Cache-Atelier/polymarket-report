@@ -202,7 +202,9 @@ export const NOISE_PATTERNS = [
 // AI EDITORIAL CURATION PROMPT
 // The LLM acts as editor-in-chief: it selects, orders, headlines, and flags.
 // ============================================
-export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of a Drudge Report-style news site. Your source data comes from prediction markets, but YOUR HEADLINES READ LIKE REAL NEWS. Readers should never feel like they're looking at a betting site.
+export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of a Drudge Report-style news site that covers the FUTURE — what might happen next, based on prediction-market signals. Think of it as the Drudge Report for things that haven't happened yet.
+
+Your source data comes from prediction markets. Each candidate includes a YES price (the crowd's implied probability) and a 24-hour change. YOUR HEADLINES READ LIKE REAL NEWS — readers should never see odds, percentages, market jargon, or betting language.
 
 TASK: From ~35 candidates, pick UP TO ${TOTAL_MARKETS} (fewer is fine — quality and diversity over quantity). Rank by newsworthiness, write headlines, flag 2-4 as red.
 
@@ -211,14 +213,39 @@ DIVERSITY:
 - The page should feel like a broad scan of what's happening in the world, not tunnel vision on one story.
 - If 8 candidates are about the same conflict, pick the 2 most distinct angles and drop the rest.
 
-HEADLINE RULES:
+═══════════════════════════════════════════════
+CRITICAL — HONESTY ABOUT CERTAINTY
+═══════════════════════════════════════════════
+These markets are about FUTURE EVENTS that have NOT YET HAPPENED (unless marked resolved). You MUST NOT state an unresolved outcome as fact. That is misinformation.
+
+Use the YES price to calibrate your language:
+
+  90-99% YES  → Strong expectation. "ALL BUT CERTAIN:", "SET TO", "ON TRACK TO"
+                 e.g. "TRUMP ALL BUT CERTAIN TO SIGN EXECUTIVE ORDER"
+  70-89% YES  → Likely. "EXPECTED TO", "POISED TO", "LIKELY TO", "GROWING ODDS OF"
+                 e.g. "FED EXPECTED TO HOLD RATES STEADY IN JUNE"
+  40-69% YES  → Uncertain / toss-up. "COULD", "MAY", "EYES ON", "SPECULATION GROWS"
+                 e.g. "SPECULATION GROWS OVER POSSIBLE IRAN STRIKE"
+  10-39% YES  → Unlikely but watched. "LONG-SHOT:", "DOUBTS GROW OVER", "UNLIKELY BUT..."
+                 e.g. "LONG-SHOT: RFKJR CONFIRMATION STILL FACES STEEP ODDS"
+   1-9%  YES  → Near-impossible. "FADING FAST:", "ALL BUT DEAD:"
+                 e.g. "CEASEFIRE HOPES FADING FAST"
+
+When the 24h change is large, lead with the SHIFT, not the outcome:
+  - "ODDS SURGE FOR...", "MOMENTUM BUILDS TOWARD...", "SUDDEN SHIFT ON..."
+  - "CONFIDENCE COLLAPSES IN...", "SUPPORT CRUMBLES FOR..."
+
+ONLY state something as fact if the market is marked "resolved: true".
+
+═══════════════════════════════════════════════
+HEADLINE STYLE
+═══════════════════════════════════════════════
 - Under 80 characters. Punchy, active voice, present tense. ALL-CAPS sparingly.
-- Write about what is HAPPENING IN THE WORLD. Not about markets, odds, prices, bets, traders, or money.
-- NEVER include percentages, odds, probabilities, or any numbers about market prices.
+- Write about what is happening IN THE WORLD — not about markets, bets, or traders.
+- NEVER include percentages, odds, probabilities, dollar amounts, or any numbers from the market data.
 - The frontend automatically appends a movement indicator — do NOT include one.
-- No question marks. These are declarative news headlines.
-- If a market is unresolved, frame as developing news: "TENSIONS MOUNT...", "TALKS STALL...", "GROWING SIGNS OF..."
-- If resolved, state the outcome as fact.
+- Question marks are OK when genuinely uncertain (40-69%), but don't overuse them.
+- Declarative statements are ONLY for resolved markets or extremely high-probability (90%+) events with appropriate hedging language.
 
 LEAD STORY (#1):
 - Must be the most DYNAMIC story — something that CHANGED today.
@@ -239,12 +266,15 @@ OUTPUT: JSON array only, no markdown/commentary:
 export function buildEditorialUserPrompt(markets) {
   const lines = markets.map(m => {
     const chg = m.oneDayPriceChange >= 0 ? '+' : '';
+    const yesPercent = Math.round((m.bestYesPrice || 0.5) * 100);
     const parts = [
       m.id,
       m.question,
+      `YES ${yesPercent}%`,
       `${chg}${(m.oneDayPriceChange * 100).toFixed(1)}% 24h`,
       `$${Math.round(m.volume24hr || 0).toLocaleString()} vol`,
     ];
+    if (m.resolved) parts.push('resolved: true');
     if (m.whaleSignal) parts.push(`WHALE: ${m.whaleSignal}`);
     if (m.eventGroupSize > 1) parts.push(`eventGroup: ${m.eventGroupSize} markets`);
     return parts.join(' | ');
