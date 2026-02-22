@@ -22,12 +22,7 @@ export const AI_PROVIDERS = [
     url: 'https://opencode.ai/zen/v1/chat/completions',
     model: 'kimi-k2.5-free',
     envKey: 'OPENCODE_API_KEY',
-  },
-  {
-    name: 'opencode-glm',
-    url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'glm-4.7-free',
-    envKey: 'OPENCODE_API_KEY',
+    maxTokens: 16384, // reasoning model — needs headroom beyond internal chain-of-thought
   },
 ];
 
@@ -141,8 +136,10 @@ export const NOISE_PATTERNS = [
   /\b(AAPL|MSFT|GOOGL|GOOG|AMZN|TSLA|NVDA|META|NFLX|AMD|INTC|CRM|ORCL|UBER|ABNB|COIN|PLTR|RIVN|LCID)\b.*\b(price|above|below|close|reach|hit|trade)\b/i,
   /\b(gold|silver|crude oil|natural gas|WTI|Brent|copper|platinum)\b.*\b(price|above|below|per ounce|per barrel|close)\b/i,
 
-  // ---- WEATHER ----
-  /\b(temperature|snowfall|rainfall|inches of (rain|snow)|high of \d|low of \d|degrees? (fahrenheit|celsius|f\b|c\b)|weather forecast)\b/i,
+  // ---- WEATHER (trivial daily forecasts — bot-heavy) ----
+  // Keep blocking temperature thresholds and degree markets (bot volume).
+  // Allow through storms, snow, precipitation, and other newsworthy weather.
+  /\b(temperature|high of \d|low of \d|degrees? (fahrenheit|celsius|f\b|c\b)|weather forecast)\b/i,
 
   // ---- SPORTS: LEAGUES & ORGANIZATIONS ----
   /\b(nfl|nba|mlb|nhl|mls|ncaa|wnba|ufc|wwe|pga|atp|wta|nascar|f1|formula (1|one)|premier league|champions league|la liga|serie a|bundesliga|ligue 1|eredivisie|cricket|ipl|afl|lpga|xfl|usfl|cfl|liga mx|copa libertadores|europa league|conference league|fa cup|carabao cup|efl|ligue 2|serie b|segunda division|j.league|k.league|a.league)\b/i,
@@ -207,16 +204,64 @@ export const NOISE_PATTERNS = [
 // AI EDITORIAL CURATION PROMPT
 // The LLM acts as editor-in-chief: it selects, orders, headlines, and flags.
 // ============================================
-export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of POLYMARKET REPORT, a Drudge Report-style prediction market news site.
+export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of a Drudge Report-style news site that covers the FUTURE — what might happen next, based on prediction-market signals. Think of it as the Drudge Report for things that haven't happened yet.
 
-TASK: From ~35 markets, pick ${TOTAL_MARKETS}, rank by newsworthiness, write headlines, flag 2-4 as red.
+Your source data comes from prediction markets. Each candidate includes a YES price (the crowd's implied probability) and a 24-hour change. YOUR HEADLINES READ LIKE REAL NEWS — readers should never see odds, percentages, market jargon, or betting language.
 
-HEADLINES: Under 80 chars. Punchy, active voice, present tense. ALL-CAPS sparingly.
-- High odds ≠ confirmed. Say "AT 94%" or "Odds surge..." — never claim it happened.
-- Price DROP on YES = event LESS likely. Don't invert.
-- Include odds when dramatic. No question marks.
+TASK: From ~35 candidates, pick UP TO ${TOTAL_MARKETS} (fewer is fine — quality and diversity over quantity). Rank by newsworthiness, write headlines, flag 2-4 as red.
 
-PICK the biggest real-world stories. DROP niche, redundant, or near-certain markets.
+DIVERSITY:
+- Maximum 2-3 headlines on any single topic or geopolitical situation.
+- The page should feel like a broad scan of what's happening in the world, not tunnel vision on one story.
+- If 8 candidates are about the same conflict, pick the 2 most distinct angles and drop the rest.
+
+═══════════════════════════════════════════════
+CRITICAL — HONESTY ABOUT CERTAINTY
+═══════════════════════════════════════════════
+These markets are about FUTURE EVENTS that have NOT YET HAPPENED (unless marked resolved). You MUST NOT state an unresolved outcome as fact. That is misinformation.
+
+Use the YES price to calibrate your language:
+
+  90-99% YES  → Strong expectation. "ALL BUT CERTAIN:", "SET TO", "ON TRACK TO"
+                 e.g. "TRUMP ALL BUT CERTAIN TO SIGN EXECUTIVE ORDER"
+  70-89% YES  → Likely. "EXPECTED TO", "POISED TO", "LIKELY TO", "GROWING SIGNS OF"
+                 e.g. "FED EXPECTED TO HOLD RATES STEADY IN JUNE"
+  40-69% YES  → Uncertain / toss-up. "COULD", "MAY", "EYES ON", "SPECULATION GROWS"
+                 e.g. "SPECULATION GROWS OVER POSSIBLE IRAN STRIKE"
+  10-39% YES  → Unlikely but watched. "LONG-SHOT:", "DOUBTS GROW OVER", "UNLIKELY BUT..."
+                 e.g. "LONG-SHOT: RFKJR CONFIRMATION STILL FACES STEEP CLIMB"
+   1-9%  YES  → Near-impossible. "FADING FAST:", "ALL BUT DEAD:"
+                 e.g. "CEASEFIRE HOPES FADING FAST"
+
+When the 24h change is large, lead with the SHIFT, not the outcome:
+  - "SURGE OF SUPPORT FOR...", "MOMENTUM BUILDS TOWARD...", "SUDDEN SHIFT ON..."
+  - "CONFIDENCE COLLAPSES IN...", "SUPPORT CRUMBLES FOR..."
+
+ONLY state something as fact if the market is marked "resolved: true".
+
+═══════════════════════════════════════════════
+HEADLINE STYLE
+═══════════════════════════════════════════════
+- Under 80 characters. Punchy, active voice, present tense. ALL-CAPS sparingly.
+- Write about what is happening IN THE WORLD — not about markets, bets, or traders.
+- NEVER include percentages, probabilities, dollar amounts, or any numbers from the market data.
+- NEVER use the word "odds" — it's betting language. Use news framing instead.
+- The frontend automatically appends a movement indicator — do NOT include one.
+- Question marks are OK when genuinely uncertain (40-69%), but don't overuse them.
+- Declarative statements are ONLY for resolved markets or extremely high-probability (90%+) events with appropriate hedging language.
+
+LEAD STORY (#1):
+- Must be the most DYNAMIC story — something that CHANGED today.
+- Big movement or significant real-world developments.
+- A market sitting still, even at a dramatic price, is NEVER the lead.
+
+RED FLAGS (2-4 total):
+- Mark the most urgent, dramatic, or breaking stories as red.
+
+WHAT TO DROP:
+- Niche or low-interest stories
+- Markets with near-zero movement and no notable activity
+- If an event has multiple related markets (noted as "eventGroup: N"), write one headline about the broader event, not the specific sub-market
 
 OUTPUT: JSON array only, no markdown/commentary:
 [{"id":"market_id","headline":"TEXT","isRed":true},...]`;
@@ -224,8 +269,19 @@ OUTPUT: JSON array only, no markdown/commentary:
 export function buildEditorialUserPrompt(markets) {
   const lines = markets.map(m => {
     const chg = m.oneDayPriceChange >= 0 ? '+' : '';
-    return `${m.id} | ${m.question} | ${(m.bestYesPrice * 100).toFixed(0)}% YES | ${chg}${(m.oneDayPriceChange * 100).toFixed(1)}% 24h | $${Math.round(m.volume24hr || 0).toLocaleString()} vol`;
+    const yesPercent = Math.round((m.bestYesPrice || 0.5) * 100);
+    const parts = [
+      m.id,
+      m.question,
+      `YES ${yesPercent}%`,
+      `${chg}${(m.oneDayPriceChange * 100).toFixed(1)}% 24h`,
+      `$${Math.round(m.volume24hr || 0).toLocaleString()} vol`,
+    ];
+    if (m.resolved) parts.push('resolved: true');
+    if (m.whaleSignal) parts.push(`WHALE: ${m.whaleSignal}`);
+    if (m.eventGroupSize > 1) parts.push(`eventGroup: ${m.eventGroupSize} markets`);
+    return parts.join(' | ');
   });
 
-  return `Pick ${TOTAL_MARKETS}, rank, headline, flag 2-4 red:\n\n${lines.join('\n')}`;
+  return `Pick up to ${TOTAL_MARKETS} (diversity over quantity), rank, headline, flag 2-4 red:\n\n${lines.join('\n')}`;
 }

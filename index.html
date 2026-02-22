@@ -98,6 +98,24 @@
       font-weight: bold;
     }
 
+    .movement {
+      font-size: 0.75em;
+      color: #666666;
+      font-weight: normal;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .headline.red .movement {
+      color: #CC0000;
+      opacity: 0.6;
+    }
+
+    #main-story .movement {
+      font-size: 0.6em;
+      color: #999;
+    }
+
     .whale-tag {
       font-size: 10px;
       color: #CC0000;
@@ -171,20 +189,22 @@
     }
 
     function formatHeadline(market) {
-      // Use AI headline if available, otherwise fall back to question + price change
-      let text;
-      if (market.headline) {
-        text = market.headline;
-      } else {
-        const rawChange = market.oneDayPriceChange * 100;
+      const text = market.headline || market.question;
+
+      // Movement indicator — always shown unless change is negligible
+      const rawChange = market.oneDayPriceChange * 100;
+      let movement = null;
+      if (Math.abs(rawChange) >= 0.1) {
         const arrow = rawChange >= 0 ? '\u2191' : '\u2193';
-        const changeText = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
-        text = `${market.question} [${changeText}]`;
+        movement = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
       }
 
       return {
         text,
-        url: `https://polymarket.com/event/${market.eventSlug || market.slug}`,
+        movement,
+        url: market.eventSlug
+          ? `https://polymarket.com/event/${market.eventSlug}`
+          : `https://polymarket.com/market/${market.slug}`,
         isRed: market.isRed,
         whaleSignal: market.whaleSignal,
       };
@@ -207,6 +227,13 @@
       mainLink.target = '_blank';
       mainLink.textContent = mainStory.text;
       mainStoryEl.appendChild(mainLink);
+
+      if (mainStory.movement) {
+        const mvSpan = document.createElement('span');
+        mvSpan.className = 'movement';
+        mvSpan.textContent = ' ' + mainStory.movement;
+        mainLink.appendChild(mvSpan);
+      }
 
       if (mainStory.whaleSignal) {
         const tag = document.createElement('div');
@@ -233,6 +260,12 @@
         link.target = '_blank';
         link.className = 'headline' + (headline.isRed ? ' red' : '');
         link.textContent = headline.text;
+        if (headline.movement) {
+          const mvSpan = document.createElement('span');
+          mvSpan.className = 'movement';
+          mvSpan.textContent = ' ' + headline.movement;
+          link.appendChild(mvSpan);
+        }
         container.appendChild(link);
 
         if (headline.whaleSignal) {

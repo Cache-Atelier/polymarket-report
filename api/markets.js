@@ -79,7 +79,7 @@ async function fetchFeaturedEvents() {
     for (const evt of events) {
       if (evt.markets && Array.isArray(evt.markets)) {
         for (const m of evt.markets) {
-          markets.push({ ...m, _isFeatured: true });
+          markets.push({ ...m, _isFeatured: true, _parentEventSlug: evt.slug });
         }
       }
     }
@@ -264,6 +264,11 @@ function rankMarkets(allMarkets, whaleTrades) {
       m._score *= VOLUME_FLOOR_PENALTY;
     }
 
+    // Stale market penalty: no movement + no whale = not newsworthy
+    if (Math.abs(m.oneDayPriceChange || 0) < 0.005 && !whale) {
+      m._score *= 0.5;
+    }
+
     // Featured boost: Polymarket's editorial picks
     if (m._isFeatured) {
       m._score *= WEIGHTS.featuredBoost;
@@ -276,11 +281,92 @@ function rankMarkets(allMarkets, whaleTrades) {
     }
   }
 
-  // Sort by composite score, take top N (larger pool for LLM curation)
+  // Sort by composite score
   scorable.sort((a, b) => b._score - a._score);
 
-  const poolSize = Math.min(scorable.length, LLM_CANDIDATE_POOL);
-  const candidates = scorable.slice(0, poolSize);
+  // Event-level dedup: keep one representative per eventSlug
+  const eventSeen = new Map(); // eventSlug → { rep, count }
+  const deduped = [];
+  for (const m of scorable) {
+    const eSlug = m.events?.[0]?.slug || m.eventSlug || m.slug;
+    if (eventSeen.has(eSlug)) {
+      // Already have a rep for this event — just bump the count
+      eventSeen.get(eSlug).count++;
+      // Steal whale signal if this sibling has one and the rep doesn't
+      if (m.whaleSignal && !eventSeen.get(eSlug).rep.whaleSignal) {
+        eventSeen.get(eSlug).rep.whaleSignal = m.whaleSignal;
+        eventSeen.get(eSlug).rep._whaleInfo = m._whaleInfo;
+      }
+      continue;
+    }
+    eventSeen.set(eSlug, { rep: m, count: 1 });
+    deduped.push(m);
+  }
+  // Tag representatives with their group size
+  for (const { rep, count } of eventSeen.values()) {
+    rep._eventGroupSize = count;
+  }
+  console.log(`Event dedup: ${scorable.length} → ${deduped.length} markets (${scorable.length - deduped.length} dupes removed)`);
+
+  // Topic-level cap: cluster by shared keywords, max 3 per topic
+  const MAX_PER_TOPIC = 3;
+  const STOP_WORDS = new Set([
+    'will','be','the','a','an','in','on','by','to','of','for','and','or',
+    'is','it','at','if','do','no','yes','not','this','that','with','from',
+    'has','have','was','are','been','its','than','before','after','during',
+    'between','about','into','over','under','more','most','what','when',
+    'who','how','which','their','there','these','those','other','new','first',
+    'us', 'end', '2025', '2026', '2027',
+  ]);
+
+  function extractTopicKeys(question) {
+    return (question || '').toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+  }
+
+  // Assign each market to a topic cluster based on keyword overlap
+  const topicClusters = []; // array of { keys: Set, markets: [] }
+  for (const m of deduped) {
+    const keys = extractTopicKeys(m.question || m.title);
+    let bestCluster = null;
+    let bestOverlap = 0;
+    for (const cluster of topicClusters) {
+      const overlap = keys.filter(k => cluster.keys.has(k)).length;
+      if (overlap >= 2 && overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestCluster = cluster;
+      }
+    }
+    if (bestCluster) {
+      bestCluster.markets.push(m);
+      for (const k of keys) bestCluster.keys.add(k);
+    } else {
+      topicClusters.push({ keys: new Set(keys), markets: [m] });
+    }
+  }
+
+  // Cap each topic cluster and reassemble (already sorted by score)
+  const topicCapped = [];
+  const clusterCounts = {};
+  for (const cluster of topicClusters) {
+    const kept = cluster.markets.slice(0, MAX_PER_TOPIC);
+    topicCapped.push(...kept);
+    if (cluster.markets.length > MAX_PER_TOPIC) {
+      const sampleKey = [...cluster.keys].slice(0, 3).join('/');
+      clusterCounts[sampleKey] = `${kept.length}/${cluster.markets.length}`;
+    }
+  }
+  // Re-sort by score since we pulled from different clusters
+  topicCapped.sort((a, b) => b._score - a._score);
+
+  if (Object.keys(clusterCounts).length > 0) {
+    console.log(`Topic cap: ${deduped.length} → ${topicCapped.length} markets`, clusterCounts);
+  }
+
+  const poolSize = Math.min(topicCapped.length, LLM_CANDIDATE_POOL);
+  const candidates = topicCapped.slice(0, poolSize);
 
   // Log top candidates
   console.log(`Candidate pool: ${candidates.length} markets for LLM curation`);
@@ -308,7 +394,7 @@ function rankMarkets(allMarkets, whaleTrades) {
       question: m.question || m.title || 'Unknown Market',
       description: m.description || '',
       slug: m.slug,
-      eventSlug: m.events?.[0]?.slug || m.eventSlug || m.slug,
+      eventSlug: m.events?.[0]?.slug || m._parentEventSlug || m.eventSlug || null,
       oneDayPriceChange: m.oneDayPriceChange || 0,
       volume24hr: m.volume24hr || 0,
       bestYesPrice,
@@ -317,6 +403,7 @@ function rankMarkets(allMarkets, whaleTrades) {
       whaleSignal: m.whaleSignal || null,
       isFeatured: !!m._isFeatured,
       score: Math.round(m._score * 1000) / 1000,
+      eventGroupSize: m._eventGroupSize || 1,
     };
   });
 }
@@ -362,14 +449,14 @@ async function curateWithLLM(candidates) {
     return null;
   }
 
-  console.log(`Racing ${runnableProviders.length} AI providers in parallel...`);
+  console.log(`Racing ${runnableProviders.length} AI providers in parallel (prompt: ${userPrompt.length} chars)...`);
 
   // Race: fire all providers at once, first valid parse wins
   const raceResults = runnableProviders.map(provider => {
     const apiKey = process.env[provider.envKey];
     const t0 = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 50_000);
+    const timeout = setTimeout(() => controller.abort(), 55_000);
 
     return fetch(provider.url, {
       method: 'POST',
@@ -384,7 +471,7 @@ async function curateWithLLM(candidates) {
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: provider.maxTokens || 4000,
       }),
       signal: controller.signal,
     })
@@ -456,7 +543,7 @@ async function curateWithLLM(candidates) {
       console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
     });
 
-    return curated.slice(0, TOTAL_MARKETS);
+    return { markets: curated.slice(0, TOTAL_MARKETS), aiProvider: provider.name, aiResponseMs: elapsed };
   } catch {
     // All providers rejected
     console.log('All AI providers failed');
@@ -502,11 +589,15 @@ export default async function handler(req, res) {
     console.log(`Candidate pool: ${candidates.length} markets`);
 
     // Phase 2: LLM editorial curation (race all providers in parallel)
-    let markets = await curateWithLLM(candidates);
-    let aiMode = 'curated';
+    const curationResult = await curateWithLLM(candidates);
+    let markets, aiMode, aiProvider = null, aiResponseMs = null;
 
-    // If all LLMs failed, fall back to algorithmic order with no headlines
-    if (!markets) {
+    if (curationResult) {
+      markets = curationResult.markets;
+      aiMode = 'curated';
+      aiProvider = curationResult.aiProvider;
+      aiResponseMs = curationResult.aiResponseMs;
+    } else {
       console.log('All AI providers failed — using algorithmic order');
       markets = candidates.slice(0, TOTAL_MARKETS).map((m, i) => ({
         ...m,
@@ -525,7 +616,9 @@ export default async function handler(req, res) {
         tagIds: TAG_IDS.map(t => t.label),
         resolvedSlugs: (slugIdCache || []).map(t => `${t.slug}→${t.id}`),
         sources: { totalMarkets: allMarkets.length, whaleTrades: whaleTrades.length },
-        aiProvider: aiMode,
+        aiMode,
+        aiProvider,
+        aiResponseMs,
       },
     };
 
