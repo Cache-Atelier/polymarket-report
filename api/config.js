@@ -222,17 +222,17 @@ Use the YES price to calibrate your language:
 
   90-99% YES  → Strong expectation. "ALL BUT CERTAIN:", "SET TO", "ON TRACK TO"
                  e.g. "TRUMP ALL BUT CERTAIN TO SIGN EXECUTIVE ORDER"
-  70-89% YES  → Likely. "EXPECTED TO", "POISED TO", "LIKELY TO", "GROWING ODDS OF"
+  70-89% YES  → Likely. "EXPECTED TO", "POISED TO", "LIKELY TO", "GROWING SIGNS OF"
                  e.g. "FED EXPECTED TO HOLD RATES STEADY IN JUNE"
   40-69% YES  → Uncertain / toss-up. "COULD", "MAY", "EYES ON", "SPECULATION GROWS"
                  e.g. "SPECULATION GROWS OVER POSSIBLE IRAN STRIKE"
   10-39% YES  → Unlikely but watched. "LONG-SHOT:", "DOUBTS GROW OVER", "UNLIKELY BUT..."
-                 e.g. "LONG-SHOT: RFKJR CONFIRMATION STILL FACES STEEP ODDS"
+                 e.g. "LONG-SHOT: RFKJR CONFIRMATION STILL FACES STEEP CLIMB"
    1-9%  YES  → Near-impossible. "FADING FAST:", "ALL BUT DEAD:"
                  e.g. "CEASEFIRE HOPES FADING FAST"
 
 When the 24h change is large, lead with the SHIFT, not the outcome:
-  - "ODDS SURGE FOR...", "MOMENTUM BUILDS TOWARD...", "SUDDEN SHIFT ON..."
+  - "SURGE OF SUPPORT FOR...", "MOMENTUM BUILDS TOWARD...", "SUDDEN SHIFT ON..."
   - "CONFIDENCE COLLAPSES IN...", "SUPPORT CRUMBLES FOR..."
 
 ONLY state something as fact if the market is marked "resolved: true".
@@ -242,7 +242,8 @@ HEADLINE STYLE
 ═══════════════════════════════════════════════
 - Under 80 characters. Punchy, active voice, present tense. ALL-CAPS sparingly.
 - Write about what is happening IN THE WORLD — not about markets, bets, or traders.
-- NEVER include percentages, odds, probabilities, dollar amounts, or any numbers from the market data.
+- NEVER include percentages, probabilities, dollar amounts, or any numbers from the market data.
+- NEVER use the word "odds" — it's betting language. Use news framing instead.
 - The frontend automatically appends a movement indicator — do NOT include one.
 - Question marks are OK when genuinely uncertain (40-69%), but don't overuse them.
 - Declarative statements are ONLY for resolved markets or extremely high-probability (90%+) events with appropriate hedging language.
