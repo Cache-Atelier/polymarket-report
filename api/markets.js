@@ -308,8 +308,65 @@ function rankMarkets(allMarkets, whaleTrades) {
   }
   console.log(`Event dedup: ${scorable.length} → ${deduped.length} markets (${scorable.length - deduped.length} dupes removed)`);
 
-  const poolSize = Math.min(deduped.length, LLM_CANDIDATE_POOL);
-  const candidates = deduped.slice(0, poolSize);
+  // Topic-level cap: cluster by shared keywords, max 3 per topic
+  const MAX_PER_TOPIC = 3;
+  const STOP_WORDS = new Set([
+    'will','be','the','a','an','in','on','by','to','of','for','and','or',
+    'is','it','at','if','do','no','yes','not','this','that','with','from',
+    'has','have','was','are','been','its','than','before','after','during',
+    'between','about','into','over','under','more','most','what','when',
+    'who','how','which','their','there','these','those','other','new','first',
+    'us', 'end', '2025', '2026', '2027',
+  ]);
+
+  function extractTopicKeys(question) {
+    return (question || '').toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+  }
+
+  // Assign each market to a topic cluster based on keyword overlap
+  const topicClusters = []; // array of { keys: Set, markets: [] }
+  for (const m of deduped) {
+    const keys = extractTopicKeys(m.question || m.title);
+    let bestCluster = null;
+    let bestOverlap = 0;
+    for (const cluster of topicClusters) {
+      const overlap = keys.filter(k => cluster.keys.has(k)).length;
+      if (overlap >= 2 && overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestCluster = cluster;
+      }
+    }
+    if (bestCluster) {
+      bestCluster.markets.push(m);
+      for (const k of keys) bestCluster.keys.add(k);
+    } else {
+      topicClusters.push({ keys: new Set(keys), markets: [m] });
+    }
+  }
+
+  // Cap each topic cluster and reassemble (already sorted by score)
+  const topicCapped = [];
+  const clusterCounts = {};
+  for (const cluster of topicClusters) {
+    const kept = cluster.markets.slice(0, MAX_PER_TOPIC);
+    topicCapped.push(...kept);
+    if (cluster.markets.length > MAX_PER_TOPIC) {
+      const sampleKey = [...cluster.keys].slice(0, 3).join('/');
+      clusterCounts[sampleKey] = `${kept.length}/${cluster.markets.length}`;
+    }
+  }
+  // Re-sort by score since we pulled from different clusters
+  topicCapped.sort((a, b) => b._score - a._score);
+
+  if (Object.keys(clusterCounts).length > 0) {
+    console.log(`Topic cap: ${deduped.length} → ${topicCapped.length} markets`, clusterCounts);
+  }
+
+  const poolSize = Math.min(topicCapped.length, LLM_CANDIDATE_POOL);
+  const candidates = topicCapped.slice(0, poolSize);
 
   // Log top candidates
   console.log(`Candidate pool: ${candidates.length} markets for LLM curation`);

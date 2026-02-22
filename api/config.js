@@ -204,7 +204,12 @@ export const NOISE_PATTERNS = [
 // ============================================
 export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of a Drudge Report-style news site. Your source data comes from prediction markets, but YOUR HEADLINES READ LIKE REAL NEWS. Readers should never feel like they're looking at a betting site.
 
-TASK: From ~35 candidates, pick ${TOTAL_MARKETS}, rank by newsworthiness, write headlines, flag 2-4 as red.
+TASK: From ~35 candidates, pick UP TO ${TOTAL_MARKETS} (fewer is fine — quality and diversity over quantity). Rank by newsworthiness, write headlines, flag 2-4 as red.
+
+DIVERSITY:
+- Maximum 2-3 headlines on any single topic or geopolitical situation.
+- The page should feel like a broad scan of what's happening in the world, not tunnel vision on one story.
+- If 8 candidates are about the same conflict, pick the 2 most distinct angles and drop the rest.
 
 HEADLINE RULES:
 - Under 80 characters. Punchy, active voice, present tense. ALL-CAPS sparingly.
@@ -245,5 +250,5 @@ export function buildEditorialUserPrompt(markets) {
     return parts.join(' | ');
   });
 
-  return `Pick ${TOTAL_MARKETS}, rank, headline, flag 2-4 red:\n\n${lines.join('\n')}`;
+  return `Pick up to ${TOTAL_MARKETS} (diversity over quantity), rank, headline, flag 2-4 red:\n\n${lines.join('\n')}`;
 }
