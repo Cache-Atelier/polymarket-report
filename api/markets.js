@@ -79,7 +79,7 @@ async function fetchFeaturedEvents() {
     for (const evt of events) {
       if (evt.markets && Array.isArray(evt.markets)) {
         for (const m of evt.markets) {
-          markets.push({ ...m, _isFeatured: true });
+          markets.push({ ...m, _isFeatured: true, _parentEventSlug: evt.slug });
         }
       }
     }
@@ -394,7 +394,7 @@ function rankMarkets(allMarkets, whaleTrades) {
       question: m.question || m.title || 'Unknown Market',
       description: m.description || '',
       slug: m.slug,
-      eventSlug: m.events?.[0]?.slug || m.eventSlug || m.slug,
+      eventSlug: m.events?.[0]?.slug || m._parentEventSlug || m.eventSlug || null,
       oneDayPriceChange: m.oneDayPriceChange || 0,
       volume24hr: m.volume24hr || 0,
       bestYesPrice,

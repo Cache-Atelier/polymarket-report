@@ -202,7 +202,9 @@
       return {
         text,
         movement,
-        url: `https://polymarket.com/event/${market.eventSlug || market.slug}`,
+        url: market.eventSlug
+          ? `https://polymarket.com/event/${market.eventSlug}`
+          : `https://polymarket.com/market/${market.slug}`,
         isRed: market.isRed,
         whaleSignal: market.whaleSignal,
       };
