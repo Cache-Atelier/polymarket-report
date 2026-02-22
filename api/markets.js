@@ -384,7 +384,7 @@ async function curateWithLLM(candidates) {
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: provider.maxTokens || 4000,
       }),
       signal: controller.signal,
     })
@@ -456,7 +456,7 @@ async function curateWithLLM(candidates) {
       console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
     });
 
-    return curated.slice(0, TOTAL_MARKETS);
+    return { markets: curated.slice(0, TOTAL_MARKETS), aiProvider: provider.name, aiResponseMs: elapsed };
   } catch {
     // All providers rejected
     console.log('All AI providers failed');
@@ -502,11 +502,15 @@ export default async function handler(req, res) {
     console.log(`Candidate pool: ${candidates.length} markets`);
 
     // Phase 2: LLM editorial curation (race all providers in parallel)
-    let markets = await curateWithLLM(candidates);
-    let aiMode = 'curated';
+    const curationResult = await curateWithLLM(candidates);
+    let markets, aiMode, aiProvider = null, aiResponseMs = null;
 
-    // If all LLMs failed, fall back to algorithmic order with no headlines
-    if (!markets) {
+    if (curationResult) {
+      markets = curationResult.markets;
+      aiMode = 'curated';
+      aiProvider = curationResult.aiProvider;
+      aiResponseMs = curationResult.aiResponseMs;
+    } else {
       console.log('All AI providers failed — using algorithmic order');
       markets = candidates.slice(0, TOTAL_MARKETS).map((m, i) => ({
         ...m,
@@ -525,7 +529,9 @@ export default async function handler(req, res) {
         tagIds: TAG_IDS.map(t => t.label),
         resolvedSlugs: (slugIdCache || []).map(t => `${t.slug}→${t.id}`),
         sources: { totalMarkets: allMarkets.length, whaleTrades: whaleTrades.length },
-        aiProvider: aiMode,
+        aiMode,
+        aiProvider,
+        aiResponseMs,
       },
     };
 

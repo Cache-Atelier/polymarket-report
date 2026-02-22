@@ -22,12 +22,7 @@ export const AI_PROVIDERS = [
     url: 'https://opencode.ai/zen/v1/chat/completions',
     model: 'kimi-k2.5-free',
     envKey: 'OPENCODE_API_KEY',
-  },
-  {
-    name: 'opencode-glm',
-    url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'glm-4.7-free',
-    envKey: 'OPENCODE_API_KEY',
+    maxTokens: 16384, // reasoning model — needs headroom beyond internal chain-of-thought
   },
 ];
 
