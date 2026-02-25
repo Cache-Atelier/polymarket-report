@@ -11,7 +11,7 @@ const GAMMA_API = 'https://gamma-api.polymarket.com';
 const DATA_API = 'https://data-api.polymarket.com';
 
 const AI_URL = 'https://opencode.ai/zen/v1/chat/completions';
-const AI_MODEL = process.env.AI_MODEL || 'claude-opus-4-20250115';
+const AI_MODEL = process.env.AI_MODEL || 'minimax-m2.5';
 const AI_API_KEY = process.env.OPENCODE_API_KEY;
 
 const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns

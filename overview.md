@@ -45,5 +45,5 @@ A Drudge Report-style news aggregator that uses Polymarket prediction markets as
 ## Environment Variables
 ```
 OPENCODE_API_KEY    — OpenCode Zen API key (set in GitHub Actions secrets)
-AI_MODEL            — Model to use (default: claude-opus-4-20250115, set in GitHub Actions vars)
+AI_MODEL            — Model to use (default: minimax-m2.5, set in GitHub Actions vars)
 ```

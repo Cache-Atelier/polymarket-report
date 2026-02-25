@@ -28,7 +28,7 @@ jobs:
       - name: Generate headlines
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          AI_MODEL: ${{ vars.AI_MODEL || 'claude-opus-4-20250115' }}
+          AI_MODEL: ${{ vars.AI_MODEL || 'minimax-m2.5' }}
         run: node generate.js
 
       - name: Commit and push
