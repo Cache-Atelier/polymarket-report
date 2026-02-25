@@ -15,7 +15,7 @@
       font-family: 'Courier New', Courier, monospace;
       background-color: #FFFFFF;
       color: #000000;
-      padding: 20px;
+      padding: 10px;
       line-height: 1.6;
     }
 
@@ -26,7 +26,7 @@
 
     #main-story {
       text-align: center;
-      margin: 30px auto 40px;
+      margin: 15px auto 20px;
       max-width: 900px;
     }
 
@@ -51,27 +51,28 @@
       text-align: center;
       font-family: Arial, Helvetica, sans-serif;
       font-size: 48px;
-      font-weight: bold;
-      margin: 50px 0;
+      font-weight: 900;
+      font-style: italic;
+      margin: 25px 0;
       color: #000000;
       letter-spacing: 2px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
 
     #columns-container {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
-      gap: 30px;
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 0 20px;
+      gap: 10px;
+      margin: 0;
+      padding: 0 10px;
     }
 
     .column {
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 8px;
       border-right: 1px solid #000000;
-      padding-right: 30px;
+      padding-right: 10px;
     }
 
     .column:last-child {
@@ -81,6 +82,7 @@
     .headline {
       font-family: 'Courier New', Courier, monospace;
       font-size: 15px;
+      font-weight: bold;
       text-decoration: underline;
       color: #000000;
       cursor: pointer;
@@ -122,6 +124,12 @@
       font-family: 'Courier New', monospace;
       font-weight: bold;
       letter-spacing: 1px;
+    }
+
+    .topic-divider {
+      border: none;
+      border-top: 1px solid #999;
+      margin: 6px 0;
     }
 
     #error-message {
@@ -242,40 +250,73 @@
         mainStoryEl.appendChild(tag);
       }
 
-      // Distribute remaining markets across 3 columns
+      // Build topic groups from consecutive same-topic headlines
+      const remaining = markets.slice(1, TOTAL_MARKETS);
+      const topicGroups = [];
+      let currentGroup = null;
+
+      for (const market of remaining) {
+        const topic = market.topic || '__ungrouped_' + market.id;
+        if (currentGroup && currentGroup.topic === topic) {
+          currentGroup.markets.push(market);
+        } else {
+          currentGroup = { topic, markets: [market] };
+          topicGroups.push(currentGroup);
+        }
+      }
+
+      // Distribute topic groups across columns, balancing by count
+      const columnMarketCounts = [0, 0, 0];
+      const columnGroups = [[], [], []];
+
+      for (const group of topicGroups) {
+        const minIdx = columnMarketCounts.indexOf(Math.min(...columnMarketCounts));
+        columnGroups[minIdx].push(group);
+        columnMarketCounts[minIdx] += group.markets.length;
+      }
+
+      // Render each column
       const columns = [
         document.getElementById('column-1'),
         document.getElementById('column-2'),
         document.getElementById('column-3'),
       ];
 
-      markets.slice(1, TOTAL_MARKETS).forEach((market, index) => {
-        const headline = formatHeadline(market);
-        const colIdx = index % 3;
+      columnGroups.forEach((groups, colIdx) => {
+        groups.forEach((group, groupIdx) => {
+          if (groupIdx > 0) {
+            const hr = document.createElement('hr');
+            hr.className = 'topic-divider';
+            columns[colIdx].appendChild(hr);
+          }
 
-        const container = document.createElement('div');
+          for (const market of group.markets) {
+            const headline = formatHeadline(market);
+            const container = document.createElement('div');
 
-        const link = document.createElement('a');
-        link.href = headline.url;
-        link.target = '_blank';
-        link.className = 'headline' + (headline.isRed ? ' red' : '');
-        link.textContent = headline.text;
-        if (headline.movement) {
-          const mvSpan = document.createElement('span');
-          mvSpan.className = 'movement';
-          mvSpan.textContent = ' ' + headline.movement;
-          link.appendChild(mvSpan);
-        }
-        container.appendChild(link);
+            const link = document.createElement('a');
+            link.href = headline.url;
+            link.target = '_blank';
+            link.className = 'headline' + (headline.isRed ? ' red' : '');
+            link.textContent = headline.text;
+            if (headline.movement) {
+              const mvSpan = document.createElement('span');
+              mvSpan.className = 'movement';
+              mvSpan.textContent = ' ' + headline.movement;
+              link.appendChild(mvSpan);
+            }
+            container.appendChild(link);
 
-        if (headline.whaleSignal) {
-          const tag = document.createElement('div');
-          tag.className = 'whale-tag';
-          tag.textContent = 'WHALE ALERT';
-          container.appendChild(tag);
-        }
+            if (headline.whaleSignal) {
+              const tag = document.createElement('div');
+              tag.className = 'whale-tag';
+              tag.textContent = 'WHALE ALERT';
+              container.appendChild(tag);
+            }
 
-        columns[colIdx].appendChild(container);
+            columns[colIdx].appendChild(container);
+          }
+        });
       });
 
       console.log(`Rendered ${Math.min(markets.length, TOTAL_MARKETS)} markets`);
