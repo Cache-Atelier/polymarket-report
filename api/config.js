@@ -100,11 +100,9 @@ export const EXPIRY_DRIFT = {
 };
 
 // ============================================
-// RED HEADLINE THRESHOLDS
+// RED HEADLINE THRESHOLDS (DEPRECATED — red selection is now LLM editorial judgment)
 // ============================================
 export const RED_THRESHOLDS = {
-  // Only score-based: top ~10% by composite score → red (~3 of 28 column headlines)
-  // Price change is NOT used — "biggest movers" almost always exceed any % threshold
   topPercentile: 0.10,
 };
 
@@ -208,7 +206,7 @@ export const EDITORIAL_SYSTEM_PROMPT = `You are the editor of a Drudge Report-st
 
 Your source data comes from prediction markets. Each candidate includes a YES price (the crowd's implied probability) and a 24-hour change. YOUR HEADLINES READ LIKE REAL NEWS — readers should never see odds, percentages, market jargon, or betting language.
 
-TASK: From ~35 candidates, pick UP TO ${TOTAL_MARKETS} (fewer is fine — quality and diversity over quantity). Rank by newsworthiness, write headlines, flag 2-4 as red.
+TASK: From ~35 candidates, pick UP TO ${TOTAL_MARKETS} (fewer is fine — quality and diversity over quantity). Rank by newsworthiness, write headlines, choose the 4 most dramatic as red. Assign each a short topic label for grouping.
 
 DIVERSITY:
 - Maximum 2-3 headlines on any single topic or geopolitical situation.
@@ -218,26 +216,24 @@ DIVERSITY:
 ═══════════════════════════════════════════════
 CRITICAL — HONESTY ABOUT CERTAINTY
 ═══════════════════════════════════════════════
-These markets are about FUTURE EVENTS that have NOT YET HAPPENED (unless marked resolved). You MUST NOT state an unresolved outcome as fact. That is misinformation.
+For UNRESOLVED markets, NEVER write a headline that states an outcome as fact.
+"Nvidia beats earnings expectations" is WRONG if the market hasn't resolved.
+Instead write "Nvidia expected to beat earnings" or "Markets brace for Nvidia earnings report."
 
-Use the YES price to calibrate your language:
-
-  90-99% YES  → Strong expectation. "ALL BUT CERTAIN:", "SET TO", "ON TRACK TO"
-                 e.g. "TRUMP ALL BUT CERTAIN TO SIGN EXECUTIVE ORDER"
-  70-89% YES  → Likely. "EXPECTED TO", "POISED TO", "LIKELY TO", "GROWING SIGNS OF"
-                 e.g. "FED EXPECTED TO HOLD RATES STEADY IN JUNE"
-  40-69% YES  → Uncertain / toss-up. "COULD", "MAY", "EYES ON", "SPECULATION GROWS"
-                 e.g. "SPECULATION GROWS OVER POSSIBLE IRAN STRIKE"
-  10-39% YES  → Unlikely but watched. "LONG-SHOT:", "DOUBTS GROW OVER", "UNLIKELY BUT..."
-                 e.g. "LONG-SHOT: RFKJR CONFIRMATION STILL FACES STEEP CLIMB"
-   1-9%  YES  → Near-impossible. "FADING FAST:", "ALL BUT DEAD:"
-                 e.g. "CEASEFIRE HOPES FADING FAST"
+This is the #1 rule. If you are unsure whether something has happened, hedge the language.
+ONLY state something as fact if the market is explicitly marked "resolved: true".
 
 When the 24h change is large, lead with the SHIFT, not the outcome:
   - "SURGE OF SUPPORT FOR...", "MOMENTUM BUILDS TOWARD...", "SUDDEN SHIFT ON..."
   - "CONFIDENCE COLLAPSES IN...", "SUPPORT CRUMBLES FOR..."
 
-ONLY state something as fact if the market is marked "resolved: true".
+SKIP BORING STATIC MARKETS:
+- A market sitting at 5% with no movement is NOT news. "Second coming remains longshot" is not a headline.
+- A market at 50% with no movement is NOT news. "Coin flip" is not a headline.
+- ONLY include low-probability or coin-flip markets if:
+  (a) There was a DRAMATIC shift (e.g., was 90% now 50%), OR
+  (b) The market resolves within 24 hours and the outcome is genuinely uncertain, OR
+  (c) Whale activity signals insider conviction.
 
 ═══════════════════════════════════════════════
 HEADLINE STYLE
@@ -255,8 +251,16 @@ LEAD STORY (#1):
 - Big movement or significant real-world developments.
 - A market sitting still, even at a dramatic price, is NEVER the lead.
 
-RED FLAGS (2-4 total):
-- Mark the most urgent, dramatic, or breaking stories as red.
+RED FLAGS (4 total):
+- Choose the 4 most DRAMATIC headlines as red based on your editorial judgment.
+- Shock value, urgency, conflict, consequence. This is a subjective editorial decision, not a formula.
+- The main story (#1) is ALWAYS displayed as red by the frontend, so it does not need the isRed flag.
+
+TOPIC GROUPING:
+- Assign each headline a short topic label (1-3 words, e.g., "Iran", "Ukraine", "AI", "US Politics", "Trade War", "Space").
+- Headlines about the same topic should share the SAME topic label (exact string match matters).
+- Order your output so that same-topic headlines are CONSECUTIVE in the array.
+- This grouping will be used to cluster related headlines visually on the page.
 
 WHAT TO DROP:
 - Niche or low-interest stories
@@ -264,7 +268,7 @@ WHAT TO DROP:
 - If an event has multiple related markets (noted as "eventGroup: N"), write one headline about the broader event, not the specific sub-market
 
 OUTPUT: JSON array only, no markdown/commentary:
-[{"id":"market_id","headline":"TEXT","isRed":true},...]`;
+[{"id":"market_id","headline":"TEXT","isRed":true,"topic":"short-label"},...]`;
 
 export function buildEditorialUserPrompt(markets) {
   const lines = markets.map(m => {

@@ -53,6 +53,8 @@ const EXPIRY_DRIFT = {
   dampener: 0.3,
 };
 
+const IMMINENT_RESOLUTION_HOURS = 24;
+
 // ============================================
 // TIER 1: HARD NOISE FILTERS (always exclude — never newsworthy)
 // ============================================
@@ -239,6 +241,35 @@ async function fetchRecentlyResolved() {
   }
 }
 
+async function fetchImminentResolution() {
+  try {
+    const res = await fetch(
+      `${GAMMA_API}/markets?active=true&closed=false&order=endDate&ascending=true&limit=50`
+    );
+    if (!res.ok) return [];
+    const markets = await res.json();
+
+    const cutoff = Date.now() + IMMINENT_RESOLUTION_HOURS * 60 * 60 * 1000;
+    const imminent = [];
+    for (const m of markets) {
+      if (!m.endDate) continue;
+      const endTime = new Date(m.endDate).getTime();
+      if (endTime > Date.now() && endTime <= cutoff) {
+        imminent.push({
+          ...m,
+          _isImminentResolution: true,
+          _hoursUntilResolution: Math.round((endTime - Date.now()) / (1000 * 60 * 60)),
+        });
+      }
+    }
+    console.log(`  Imminent resolution: ${imminent.length} markets (next ${IMMINENT_RESOLUTION_HOURS}h)`);
+    return imminent;
+  } catch (err) {
+    console.log(`  Imminent resolution error: ${err.message}`);
+    return [];
+  }
+}
+
 async function fetchWhaleTrades() {
   try {
     const res = await fetch(
@@ -266,17 +297,18 @@ async function fetchAllMarkets() {
     ...resolvedTags.map(t => ({ id: t.id, label: `${t.label} [${t.slug}]`, limit: 30 })),
   ];
 
-  console.log(`Phase 2: Fetching from ${allTagIds.length} sources + featured + resolved...`);
-  const [featured, resolved, ...tagResults] = await Promise.all([
+  console.log(`Phase 2: Fetching from ${allTagIds.length} sources + featured + resolved + imminent...`);
+  const [featured, resolved, imminent, ...tagResults] = await Promise.all([
     fetchFeaturedEvents(),
     fetchRecentlyResolved(),
+    fetchImminentResolution(),
     ...allTagIds.map(t => fetchMarketsByTagId(t.id, t.label, t.limit)),
   ]);
 
   const tagMarkets = tagResults.flat();
-  console.log(`Totals: ${featured.length} featured, ${resolved.length} resolved, ${tagMarkets.length} from tags`);
+  console.log(`Totals: ${featured.length} featured, ${resolved.length} resolved, ${imminent.length} imminent, ${tagMarkets.length} from tags`);
 
-  return [...featured, ...resolved, ...tagMarkets];
+  return [...featured, ...resolved, ...imminent, ...tagMarkets];
 }
 
 // ============================================
@@ -377,6 +409,10 @@ function rankAndEnrich(allMarkets, whaleTrades) {
         existing._isRecentlyResolved = true;
         existing._resolvedTime = m._resolvedTime;
       }
+      if (m._isImminentResolution) {
+        existing._isImminentResolution = true;
+        existing._hoursUntilResolution = m._hoursUntilResolution;
+      }
       if (m._parentEventTitle && !existing._parentEventTitle) {
         existing._parentEventTitle = m._parentEventTitle;
         existing._parentEventSlug = m._parentEventSlug;
@@ -427,11 +463,17 @@ function rankAndEnrich(allMarkets, whaleTrades) {
     const whaleSignal = whale ? Math.min(whale.count / 3, 1) : 0;
     const newTrendingSignal = isNewAndTrending(m) ? 1 : 0;
 
-    // Expiry drift dampener
+    // Expiry drift dampener — exempt imminent-resolution markets
     if (m.endDate) {
       const daysToExpiry = (new Date(m.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
       const yesPrice = getYesPrice(m);
-      if (daysToExpiry <= EXPIRY_DRIFT.daysThreshold
+
+      if (daysToExpiry <= 1) {
+        // Flag any market resolving within 24h as imminent (even if not from dedicated fetch)
+        m._isImminentResolution = true;
+        m._hoursUntilResolution = Math.round(daysToExpiry * 24);
+        // Do NOT dampen — imminent resolution is newsworthy
+      } else if (daysToExpiry <= EXPIRY_DRIFT.daysThreshold
           && (yesPrice < EXPIRY_DRIFT.priceExtremeBelow || yesPrice > EXPIRY_DRIFT.priceExtremeAbove)) {
         priceSignal *= EXPIRY_DRIFT.dampener;
       }
@@ -547,6 +589,8 @@ function rankAndEnrich(allMarkets, whaleTrades) {
     isRecentlyResolved: !!m._isRecentlyResolved,
     resolvedOutcome: m._resolvedOutcome || null,
     resolvedTime: m._resolvedTime || null,
+    isImminentResolution: !!m._isImminentResolution,
+    hoursUntilResolution: m._hoursUntilResolution || null,
     endDate: m.endDate,
     whaleSignal: m.whaleSignal || null,
     isFeatured: !!m._isFeatured,
@@ -588,6 +632,23 @@ function buildEditorialBriefing(candidates) {
     for (const m of resolved) {
       sections.push(`★ RESOLVED ${m.resolvedOutcome}: "${m.question}"`);
       sections.push(`  Resolved: ${m.resolvedTime}`);
+      if (m.description) sections.push(`  Context: ${m.description}`);
+      sections.push(`  id: ${m.id}`);
+      sections.push('');
+    }
+  }
+
+  // Imminent resolution section
+  const imminent = candidates.filter(m => m.isImminentResolution && !m.isRecentlyResolved);
+  if (imminent.length > 0) {
+    sections.push('═══════════════════════════════════════');
+    sections.push('RESOLVING WITHIN 24 HOURS — DEADLINE APPROACHING');
+    sections.push('═══════════════════════════════════════');
+    sections.push('These markets resolve VERY SOON. The outcome is about to be decided.\n');
+    for (const m of imminent) {
+      const hrs = m.hoursUntilResolution;
+      sections.push(`DEADLINE ~${hrs}h: "${m.question}"`);
+      sections.push(`  YES ${Math.round(m.bestYesPrice * 100)}% | vol $${Math.round(m.volume24hr).toLocaleString()}`);
       if (m.description) sections.push(`  Context: ${m.description}`);
       sections.push(`  id: ${m.id}`);
       sections.push('');
@@ -675,9 +736,9 @@ function formatMarketForBriefing(market, isEventPrimary) {
 
 const EDITORIAL_SYSTEM_PROMPT = `You are the editor-in-chief of POLYMARKET REPORT — a Drudge Report-style news site that covers the FUTURE, using prediction-market signals to surface what matters next.
 
-You are being given a rich editorial briefing with market data, event context, resolution criteria, whale signals, and recently resolved outcomes. Take your time to think through what is truly newsworthy.
+You are being given a rich editorial briefing with market data, event context, resolution criteria, whale signals, recently resolved outcomes, and markets about to resolve. Take your time to think through what is truly newsworthy.
 
-YOUR JOB: From the briefing, select UP TO ${TOTAL_MARKETS} stories. Rank them by newsworthiness. Write a punchy headline for each. Flag 2-4 as red (most urgent/dramatic).
+YOUR JOB: From the briefing, select UP TO ${TOTAL_MARKETS} stories. Rank them by newsworthiness. Write a punchy headline for each. Choose the 4 most dramatic as red. Assign each a short topic label for grouping.
 
 ═══════════════════════════════════════════════
 EDITORIAL PRINCIPLES
@@ -698,23 +759,33 @@ EDITORIAL PRINCIPLES
    - The page should feel like a broad scan of what's happening in the world.
    - If 8 candidates are about the same conflict, pick the 2 most distinct angles.
 
+4. IMMINENT RESOLUTION IS URGENT
+   - Markets resolving within 24 hours are ticking clocks — the outcome is about to be decided.
+   - These deserve attention even if volume or price change is modest.
+   - Frame them with urgency: "HOURS TO GO:", "DEADLINE LOOMS:", "DECISION IMMINENT:"
+
 ═══════════════════════════════════════════════
 HONESTY ABOUT CERTAINTY (CRITICAL)
 ═══════════════════════════════════════════════
 
-For UNRESOLVED markets, NEVER state an outcome as fact. Use the YES price to calibrate language:
+For UNRESOLVED markets, NEVER write a headline that states an outcome as fact.
+"Nvidia beats earnings expectations" is WRONG if the market hasn't resolved.
+Instead write "Nvidia expected to beat earnings" or "Markets brace for Nvidia earnings report."
 
-  90-99% YES  → "ALL BUT CERTAIN:", "SET TO", "ON TRACK TO"
-  70-89% YES  → "EXPECTED TO", "POISED TO", "LIKELY TO"
-  40-69% YES  → "COULD", "MAY", "EYES ON", "SPECULATION GROWS"
-  10-39% YES  → "LONG-SHOT:", "DOUBTS GROW OVER", "UNLIKELY BUT..."
-   1-9%  YES  → "FADING FAST:", "ALL BUT DEAD:"
+This is the #1 rule. If you are unsure whether something has happened, hedge the language.
+ONLY state something as fact if the market is explicitly marked "RESOLVED".
 
 When the 24h change is large, lead with the SHIFT:
   "SURGE OF SUPPORT FOR...", "MOMENTUM BUILDS TOWARD..."
   "CONFIDENCE COLLAPSES IN...", "SUPPORT CRUMBLES FOR..."
 
-ONLY state something as fact if the market is marked "RESOLVED".
+SKIP BORING STATIC MARKETS:
+- A market sitting at 5% with no movement is NOT news. "Second coming remains longshot" is not a headline.
+- A market at 50% with no movement is NOT news. "Coin flip" is not a headline.
+- ONLY include low-probability or coin-flip markets if:
+  (a) There was a DRAMATIC shift (e.g., was 90% now 50%), OR
+  (b) The market resolves within 24 hours and the outcome is genuinely uncertain, OR
+  (c) Whale activity signals insider conviction.
 
 ═══════════════════════════════════════════════
 HEADLINE STYLE
@@ -731,8 +802,16 @@ LEAD STORY (#1):
 - Big movement, whale activity, or a confirmed resolution.
 - A market sitting still is NEVER the lead.
 
-RED FLAGS (2-4 total):
-- The most urgent, dramatic, or breaking stories.
+RED FLAGS (4 total):
+- Choose the 4 most DRAMATIC headlines as red based on your editorial judgment.
+- Shock value, urgency, conflict, consequence. This is a subjective editorial decision, not a formula.
+- The main story (#1) is ALWAYS displayed as red by the frontend, so it does not need the isRed flag.
+
+TOPIC GROUPING:
+- Assign each headline a short topic label (1-3 words, e.g., "Iran", "Ukraine", "AI", "US Politics", "Trade War", "Space").
+- Headlines about the same topic should share the SAME topic label (exact string match matters).
+- Order your output so that same-topic headlines are CONSECUTIVE in the array.
+- This grouping will be used to cluster related headlines visually on the page.
 
 SOFT-FLAGGED MARKETS:
 - Some markets are flagged with ⚠ SOFT CATEGORY warnings (weather, entertainment, sports).
@@ -745,7 +824,7 @@ WHAT TO DROP:
 - Routine, predictable outcomes that aren't surprising
 
 OUTPUT: Return a JSON array only, no markdown fences, no commentary:
-[{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true},...]`;
+[{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true,"topic":"short-label"},...]`;
 
 // ============================================
 // LLM CALL (OpenCode Zen — OpenAI-compatible)
@@ -844,6 +923,7 @@ function assembleOutput(candidates, llmResult) {
       ...original,
       headline: pick.headline || null,
       isRed: !!pick.isRed,
+      topic: pick.topic || null,
       // Remove internal fields from output
       softNoiseFlags: undefined,
       siblingMarkets: undefined,
@@ -852,6 +932,11 @@ function assembleOutput(candidates, llmResult) {
 
   if (markets.length < TOTAL_MARKETS * 0.3) {
     console.warn(`WARNING: Only ${markets.length} markets matched — LLM may have returned bad IDs`);
+  }
+
+  const topicCount = markets.filter(m => m.topic).length;
+  if (topicCount < markets.length * 0.5) {
+    console.warn(`WARNING: Only ${topicCount}/${markets.length} markets have topic labels`);
   }
 
   // Log the top headlines
@@ -880,6 +965,7 @@ function buildFallbackOutput(candidates) {
     ...m,
     headline: null,
     isRed: i < Math.floor(TOTAL_MARKETS * 0.10),
+    topic: null,
     softNoiseFlags: undefined,
     siblingMarkets: undefined,
   }));
