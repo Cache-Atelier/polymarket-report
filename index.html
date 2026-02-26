@@ -256,8 +256,8 @@
       let currentGroup = null;
 
       for (const market of remaining) {
-        const topic = market.topic || '__ungrouped_' + market.id;
-        if (currentGroup && currentGroup.topic === topic) {
+        const topic = market.topic || null;
+        if (topic && currentGroup && currentGroup.topic === topic) {
           currentGroup.markets.push(market);
         } else {
           currentGroup = { topic, markets: [market] };
@@ -284,7 +284,7 @@
 
       columnGroups.forEach((groups, colIdx) => {
         groups.forEach((group, groupIdx) => {
-          if (groupIdx > 0) {
+          if (groupIdx > 0 && group.topic && groups[groupIdx - 1].topic) {
             const hr = document.createElement('hr');
             hr.className = 'topic-divider';
             columns[colIdx].appendChild(hr);
