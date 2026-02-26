@@ -832,6 +832,14 @@ EDITORIAL TONE:
 - Do NOT headline a market just because it's resolving soon. If the price didn't move, there's no story.
 - "Long-shot" or "remains unlikely" is NEVER a headline. If nothing changed, skip it.
 
+FINAL STEP — SEMANTIC GROUPING:
+After selecting and writing all your headlines, review the FULL list as a group.
+Reorder the array so that semantically related headlines are CONSECUTIVE.
+Then assign each headline a short topic label (1-3 words) — headlines you consider related MUST share the EXACT SAME label string.
+Do NOT just label individually — read all headlines together and decide what belongs together.
+Single-topic headlines that don't relate to anything else should get a unique label or null.
+The lead story (#1) stays at position #1. Reorder positions #2 onward.
+
 SOFT-FLAGGED MARKETS:
 - Some markets are flagged with ⚠ SOFT CATEGORY warnings (weather, entertainment, sports).
 - These are USUALLY noise, but sometimes newsworthy. Read the guidance and use your judgment.
@@ -843,7 +851,7 @@ WHAT TO DROP:
 - Routine, predictable outcomes that aren't surprising
 
 OUTPUT: Return a JSON array only, no markdown fences, no commentary:
-[{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true},...]`;
+[{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true,"topic":"short-label"},...]`;
 
 // ============================================
 // LLM CALL (OpenCode Zen — OpenAI-compatible)
@@ -1015,6 +1023,7 @@ function assembleOutput(candidates, llmResult) {
       ...original,
       headline: pick.headline || null,
       isRed: !!pick.isRed,
+      topic: pick.topic || null,
       // Remove internal fields from output
       softNoiseFlags: undefined,
       siblingMarkets: undefined,
@@ -1025,8 +1034,10 @@ function assembleOutput(candidates, llmResult) {
     console.warn(`WARNING: Only ${markets.length} markets matched — LLM may have returned bad IDs`);
   }
 
-  // Algorithmic semantic grouping: cluster related headlines together
-  const grouped = groupHeadlinesByTopic(markets);
+  // Use LLM-assigned topics if present, fall back to algorithmic grouping
+  const hasLLMTopics = markets.filter(m => m.topic).length >= 3;
+  const grouped = hasLLMTopics ? markets : groupHeadlinesByTopic(markets);
+  console.log(`Topic source: ${hasLLMTopics ? 'LLM' : 'algorithmic fallback'}`);
 
   // Log the top headlines
   console.log('\n=== CURATED HEADLINES ===');
