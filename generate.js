@@ -803,15 +803,17 @@ LEAD STORY (#1):
 - A market sitting still is NEVER the lead.
 
 RED FLAGS (4 total):
-- Choose the 4 most DRAMATIC headlines as red based on your editorial judgment.
-- Shock value, urgency, conflict, consequence. This is a subjective editorial decision, not a formula.
+- Choose the 4 most SHOCKING or SURPRISING headlines — the ones that make a reader stop scrolling.
+- Red headlines can appear ANYWHERE in the list, not just at the top. A story ranked #15 can be red if it's shocking.
+- Spread them out — do NOT cluster all 4 red headlines in positions #2-#5.
 - The main story (#1) is ALWAYS displayed as red by the frontend, so it does not need the isRed flag.
 
-TOPIC GROUPING:
-- Assign each headline a short topic label (1-3 words, e.g., "Iran", "Ukraine", "AI", "US Politics", "Trade War", "Space").
-- Headlines about the same topic should share the SAME topic label (exact string match matters).
-- Order your output so that same-topic headlines are CONSECUTIVE in the array.
-- This grouping will be used to cluster related headlines visually on the page.
+FINAL STEP — SEMANTIC GROUPING:
+After selecting and writing all your headlines, review the FULL list as a group.
+Reorder the array so that semantically related headlines are CONSECUTIVE.
+Then assign each headline a short topic label (1-3 words) — headlines you consider related MUST share the EXACT SAME label string.
+Do NOT just label individually — read all headlines together and decide what belongs together.
+The lead story (#1) stays at position #1. Reorder positions #2 onward.
 
 SOFT-FLAGGED MARKETS:
 - Some markets are flagged with ⚠ SOFT CATEGORY warnings (weather, entertainment, sports).
