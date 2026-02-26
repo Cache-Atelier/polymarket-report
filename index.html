@@ -147,6 +147,44 @@
       margin: 50px 0;
     }
 
+    #footer {
+      display: none;
+      text-align: center;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      border-top: 1px solid #999;
+      margin: 30px auto 10px;
+      padding: 15px 10px;
+      max-width: 900px;
+      line-height: 2.2;
+    }
+
+    #footer a {
+      color: #666;
+      text-decoration: underline;
+    }
+
+    #footer a:hover {
+      color: #000;
+    }
+
+    #footer .tip-address {
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    #footer .tip-address:hover {
+      color: #000;
+    }
+
+    #footer .copied-flash {
+      color: #FF0000;
+      font-weight: bold;
+      margin-left: 5px;
+    }
+
     @media (max-width: 768px) {
       #columns-container {
         grid-template-columns: 1fr;
@@ -179,6 +217,13 @@
   </div>
   <div id="error-message"></div>
 
+  <div id="footer">
+    <div id="footer-timestamp"></div>
+    <div>BUY ME A COFFEE: <span class="tip-address" id="tip-address" onclick="copyTipAddress()">0xPLACEHOLDER</span><span id="copied-flash"></span></div>
+    <div>CONTACT: <a href="https://x.com/onchaindom" target="_blank">@ONCHAINDOM</a></div>
+    <div><a href="https://cacheatelier.work" target="_blank">Cache Atelier</a> me fecit</div>
+  </div>
+
   <script>
     const TOTAL_MARKETS = 28;
 
@@ -188,11 +233,11 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         console.log(`Fetched ${data.markets?.length} markets (AI: ${data.meta?.aiProvider})`);
-        return data.markets || [];
+        return { markets: data.markets || [], meta: data.meta || {} };
       } catch (error) {
         console.error('Failed to fetch markets:', error);
         showError('Error loading markets. Please refresh the page.');
-        return [];
+        return { markets: [], meta: {} };
       }
     }
 
@@ -327,10 +372,51 @@
       document.getElementById('error-message').textContent = message;
     }
 
+    function formatTimestamp(isoString) {
+      if (!isoString) return null;
+      const date = new Date(isoString);
+      return date.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      }).toUpperCase() + ' ' + date.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+      }).toUpperCase();
+    }
+
+    function copyTipAddress() {
+      const address = document.getElementById('tip-address').textContent;
+      const flash = document.getElementById('copied-flash');
+      (navigator.clipboard ? navigator.clipboard.writeText(address) : Promise.reject())
+        .catch(() => {
+          const ta = document.createElement('textarea');
+          ta.value = address;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        })
+        .then(() => {
+          flash.textContent = 'COPIED';
+          flash.className = 'copied-flash';
+          setTimeout(() => { flash.textContent = ''; }, 1500);
+        });
+    }
+
+    function renderFooter(meta) {
+      const footer = document.getElementById('footer');
+      const ts = formatTimestamp(meta.generated);
+      if (ts) {
+        document.getElementById('footer-timestamp').textContent = 'MARKETS UPDATED: ' + ts;
+      }
+      footer.style.display = 'block';
+    }
+
     async function init() {
-      const markets = await fetchMarkets();
+      const { markets, meta } = await fetchMarkets();
       if (markets.length === 0) return;
       renderMarkets(markets);
+      renderFooter(meta);
     }
 
     window.addEventListener('DOMContentLoaded', init);

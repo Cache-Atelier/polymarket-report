@@ -12,17 +12,16 @@ export const DATA_API = 'https://data-api.polymarket.com';
 // ============================================
 export const AI_PROVIDERS = [
   {
-    name: 'opencode-minimax',
-    url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'minimax-m2.5-free',
-    envKey: 'OPENCODE_API_KEY',
+    name: 'openrouter-sonnet',
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'anthropic/claude-sonnet-4-6',
+    envKey: 'OPENROUTER_API_KEY',
   },
   {
-    name: 'opencode-kimi',
+    name: 'opencode-minimax',
     url: 'https://opencode.ai/zen/v1/chat/completions',
-    model: 'kimi-k2.5-free',
+    model: 'minimax-m2.5',
     envKey: 'OPENCODE_API_KEY',
-    maxTokens: 16384, // reasoning model — needs headroom beyond internal chain-of-thought
   },
 ];
 
@@ -166,10 +165,6 @@ export const NOISE_PATTERNS = [
   // ---- SPORTS: POSITIONS (catches player-centric markets) ----
   /\b(quarterback|wide receiver|running back|tight end|linebacker|cornerback|safety|pitcher|catcher|shortstop|outfielder|designated hitter|goalie|goalkeeper|striker|midfielder|defender|winger|point guard|shooting guard|small forward|power forward|center(?! for))\b/i,
 
-  // ---- SPORTS: TEAM vs TEAM pattern ----
-  // Catches "Lakers vs Celtics", "Chiefs vs Eagles", "Arsenal vs Liverpool"
-  /\bvs\.?\s/i,
-
   // ---- SPORTS: BOXING / MMA ----
   /\b(boxing|MMA|mixed martial arts|bout|title fight|championship fight|fight card|weigh.in|undercard|main event winner|co.main)\b/i,
 
@@ -245,6 +240,36 @@ HEADLINE STYLE
 - The frontend automatically appends a movement indicator — do NOT include one.
 - Question marks are OK when genuinely uncertain (40-69%), but don't overuse them.
 - Declarative statements are ONLY for resolved markets or extremely high-probability (90%+) events with appropriate hedging language.
+
+DRUDGE-STYLE HEADLINE EXAMPLES (note the MIX of caps and lowercase — caps for EMPHASIS, not entire headline):
+
+  BEFORE: "Fed to hold interest rates steady in March"
+  AFTER:  "Fed FREEZES rates..."
+
+  BEFORE: "DHS shutdown expected to last 21 days"
+  AFTER:  "DHS shutdown drags into THIRD WEEK"
+
+  BEFORE: "Russia advances toward Bilytske"
+  AFTER:  "Russian forces PUSH into Bilytske..."
+
+  BEFORE: "Trump approval rating drops 5 points"
+  AFTER:  "Trump approval in FREEFALL..."
+
+  BEFORE: "AI regulation bill introduced in Senate"
+  AFTER:  "Senate moves to REIN IN artificial intelligence..."
+
+STYLISTIC TECHNIQUES:
+- Trailing ellipses (...) to create intrigue and imply a developing story. Use on ~30-50% of headlines.
+- Selective ALL CAPS for the key verb or dramatic phrase — NOT the entire headline.
+  Good: "Fed FREEZES rates..." / Bad: "FED FREEZES RATES..."
+- Short punchy verbs: push, slam, surge, crash, freeze, barrel, rein in, brace, loom.
+- NEVER passive voice. Not "rates expected to be held" but "Fed FREEZES rates."
+
+PRICE DIRECTION — READ CAREFULLY:
+- A YES price DROPPING means the event is LESS likely to happen. Do NOT write a headline implying it happened.
+- A YES price RISING means the event is MORE likely to happen.
+- Example: "Will USD reach 1.7M Iranian rials?" dropping from 33% to 5% means the rial is STRENGTHENING, not crashing.
+- When in doubt about the direction, frame the headline around the SHIFT itself: "Momentum shifts on...", "Markets reverse on..."
 
 LEAD STORY (#1):
 - Must be the most DYNAMIC story — something that CHANGED today.

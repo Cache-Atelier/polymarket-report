@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Polymarket Report — Offline Curation Script
 // Fetches enriched Polymarket data, builds an editorial briefing,
-// calls an LLM (via OpenCode Zen) for high-quality headline curation,
+// calls an LLM (via OpenRouter / OpenCode Zen fallback) for headline curation,
 // and writes the result to data/headlines.json for static serving.
 
 // ============================================
@@ -10,9 +10,20 @@
 const GAMMA_API = 'https://gamma-api.polymarket.com';
 const DATA_API = 'https://data-api.polymarket.com';
 
-const AI_URL = 'https://opencode.ai/zen/v1/chat/completions';
-const AI_MODEL = process.env.AI_MODEL || 'minimax-m2.5';
-const AI_API_KEY = process.env.OPENCODE_API_KEY;
+const AI_PROVIDERS = [
+  {
+    name: 'openrouter-sonnet',
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'anthropic/claude-sonnet-4-6',
+    envKey: 'OPENROUTER_API_KEY',
+  },
+  {
+    name: 'opencode-minimax',
+    url: 'https://opencode.ai/zen/v1/chat/completions',
+    model: 'minimax-m2.5',
+    envKey: 'OPENCODE_API_KEY',
+  },
+];
 
 const TOTAL_MARKETS = 28;           // 1 main story + 27 in columns
 const LLM_CANDIDATE_POOL = 50;      // Send more context to a smarter model
@@ -88,9 +99,6 @@ const HARD_NOISE_PATTERNS = [
   // ---- SPORTS: POSITIONS ----
   /\b(quarterback|wide receiver|running back|tight end|linebacker|cornerback|safety|pitcher|catcher|shortstop|outfielder|designated hitter|goalie|goalkeeper|striker|midfielder|defender|winger|point guard|shooting guard|small forward|power forward|center(?! for))\b/i,
 
-  // ---- SPORTS: TEAM vs TEAM ----
-  /\bvs\.?\s/i,
-
   // ---- SPORTS: BOXING / MMA ----
   /\b(boxing|MMA|mixed martial arts|bout|title fight|championship fight|fight card|weigh.in|undercard|main event winner|co.main)\b/i,
 
@@ -133,6 +141,11 @@ const SOFT_NOISE_PATTERNS = [
     category: 'entertainment',
     pattern: /\b(box office|opening weekend|gross(ed|ing)?|Oscar|Academy Award|Grammy|Emmy|Golden Globe|Tony Award|BAFTA|Billboard|album sales|chart position|Bachelor(ette)?|Survivor|Big Brother|Love Island|American Idol|The Voice)\b/i,
     guidance: 'Entertainment markets are usually low-signal. Only include if it represents a major cultural moment with broad significance beyond the entertainment industry.',
+  },
+  {
+    category: 'vs-matchup',
+    pattern: /\bvs\.?\s/i,
+    guidance: 'Usually sports matchups. Only include if it represents a policy confrontation, legal case, or geopolitical conflict.',
   },
   {
     category: 'sports-league',
@@ -493,11 +506,13 @@ function rankAndEnrich(allMarkets, whaleTrades) {
       const daysToExpiry = (new Date(m.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
       const yesPrice = getYesPrice(m);
 
-      if (daysToExpiry <= 1) {
-        // Flag any market resolving within 24h as imminent (even if not from dedicated fetch)
+      if (daysToExpiry <= 0) {
+        // Past endDate — market should have resolved. Dampen stale price signal.
+        priceSignal *= 0.1;
+      } else if (daysToExpiry <= 1) {
+        // Genuinely imminent (0-24h) — flag it, don't dampen
         m._isImminentResolution = true;
         m._hoursUntilResolution = Math.round(daysToExpiry * 24);
-        // Do NOT dampen — imminent resolution is newsworthy
       } else if (daysToExpiry <= EXPIRY_DRIFT.daysThreshold
           && (yesPrice < EXPIRY_DRIFT.priceExtremeBelow || yesPrice > EXPIRY_DRIFT.priceExtremeAbove)) {
         priceSignal *= EXPIRY_DRIFT.dampener;
@@ -815,6 +830,48 @@ HEADLINE STYLE
 - The frontend automatically appends a movement indicator — do NOT include one.
 - Question marks OK when genuinely uncertain (40-69%), but don't overuse.
 
+DRUDGE-STYLE HEADLINE EXAMPLES (note the MIX of caps and lowercase — caps for EMPHASIS, not entire headline):
+
+  BEFORE: "Fed to hold interest rates steady in March"
+  AFTER:  "Fed FREEZES rates..."
+
+  BEFORE: "DHS shutdown expected to last 21 days"
+  AFTER:  "DHS shutdown drags into THIRD WEEK"
+
+  BEFORE: "Russia advances toward Bilytske"
+  AFTER:  "Russian forces PUSH into Bilytske..."
+
+  BEFORE: "Trump approval rating drops 5 points"
+  AFTER:  "Trump approval in FREEFALL..."
+
+  BEFORE: "AI regulation bill introduced in Senate"
+  AFTER:  "Senate moves to REIN IN artificial intelligence..."
+
+  BEFORE: "Iran nuclear deal negotiations resume"
+  AFTER:  "Iran BACK at the table..."
+
+  BEFORE: "SpaceX Starship test flight scheduled"
+  AFTER:  "Starship set for NEXT LAUNCH..."
+
+  BEFORE: "Harvey Weinstein faces prison time"
+  AFTER:  "Weinstein HEADED TO PRISON..."
+
+STYLISTIC TECHNIQUES:
+- Trailing ellipses (...) to create intrigue and imply a developing story. Use on ~30-50% of headlines.
+- Selective ALL CAPS for the key verb or dramatic phrase — NOT the entire headline.
+  Good: "Fed FREEZES rates..." / Bad: "FED FREEZES RATES..."
+  Good: "Trump approval in FREEFALL..." / Bad: "TRUMP APPROVAL IN FREEFALL..."
+- Short punchy verbs: push, slam, surge, crash, freeze, barrel, rein in, brace, loom.
+- NEVER passive voice. Not "rates expected to be held" but "Fed FREEZES rates."
+
+═══════════════════════════════════════════════
+PRICE DIRECTION — READ CAREFULLY
+═══════════════════════════════════════════════
+- A YES price DROPPING means the event is LESS likely to happen. Do NOT write a headline implying it happened.
+- A YES price RISING means the event is MORE likely to happen.
+- Example: "Will USD reach 1.7M Iranian rials?" dropping from 33% to 5% means the rial is STRENGTHENING, not crashing.
+- When in doubt about the direction, frame the headline around the SHIFT itself: "Momentum shifts on...", "Markets reverse on..."
+
 LEAD STORY (#1):
 - Must be the most DYNAMIC story — something that CHANGED today, or just resolved.
 - Big movement, whale activity, or a confirmed resolution.
@@ -854,77 +911,90 @@ OUTPUT: Return a JSON array only, no markdown fences, no commentary:
 [{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true,"topic":"short-label"},...]`;
 
 // ============================================
-// LLM CALL (OpenCode Zen — OpenAI-compatible)
+// LLM CALL (multi-provider with fallback)
 // ============================================
 
 async function callLLM(briefing) {
-  if (!AI_API_KEY) {
-    throw new Error('OPENCODE_API_KEY environment variable is required');
-  }
-
   const userPrompt = `Here is today's editorial briefing. Pick up to ${TOTAL_MARKETS} stories, rank by newsworthiness, write headlines, flag exactly 4 as red (not counting #1).\n\n${briefing}`;
 
-  console.log(`\nCalling ${AI_MODEL} via OpenCode Zen (${userPrompt.length} char prompt)...`);
-  const t0 = Date.now();
+  let lastError;
 
-  const response = await fetch(AI_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${AI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      messages: [
-        { role: 'system', content: EDITORIAL_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 8192,
-    }),
-  });
+  for (const provider of AI_PROVIDERS) {
+    const apiKey = process.env[provider.envKey];
+    if (!apiKey) {
+      console.log(`Skipping ${provider.name}: ${provider.envKey} not set`);
+      continue;
+    }
 
-  const elapsed = Date.now() - t0;
+    console.log(`\nCalling ${provider.model} via ${provider.name} (${userPrompt.length} char prompt)...`);
+    const t0 = Date.now();
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`LLM API error ${response.status}: ${errText}`);
+    try {
+      const response = await fetch(provider.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
+            { role: 'system', content: EDITORIAL_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.55,
+          max_tokens: provider.maxTokens || 8192,
+        }),
+      });
+
+      const elapsed = Date.now() - t0;
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`API error ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content
+        || data.choices?.[0]?.message?.text
+        || data.choices?.[0]?.text
+        || (typeof data.result === 'string' ? data.result : null);
+
+      if (!content) {
+        throw new Error(`Empty response. finish_reason=${data.choices?.[0]?.finish_reason}`);
+      }
+
+      console.log(`${provider.name} responded in ${(elapsed / 1000).toFixed(1)}s`);
+
+      // Parse JSON from response (handle markdown fences)
+      const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
+      let picks;
+      try {
+        picks = JSON.parse(cleaned);
+      } catch (parseErr) {
+        console.error('Failed to parse LLM response as JSON:');
+        console.error(cleaned.substring(0, 500));
+        throw parseErr;
+      }
+
+      if (picks && !Array.isArray(picks) && typeof picks === 'object') {
+        const arrVal = Object.values(picks).find(v => Array.isArray(v));
+        if (arrVal) picks = arrVal;
+      }
+
+      if (!Array.isArray(picks) || picks.length === 0) {
+        throw new Error('LLM response is not a valid array');
+      }
+
+      console.log(`LLM selected ${picks.length} markets (${picks.filter(p => p.isRed).length} red)`);
+      return { picks, elapsed, model: provider.model, aiProvider: provider.name };
+    } catch (err) {
+      console.error(`${provider.name} failed: ${err.message}`);
+      lastError = err;
+    }
   }
 
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content
-    || data.choices?.[0]?.message?.text
-    || data.choices?.[0]?.text
-    || (typeof data.result === 'string' ? data.result : null);
-
-  if (!content) {
-    throw new Error(`Empty LLM response. finish_reason=${data.choices?.[0]?.finish_reason}`);
-  }
-
-  console.log(`LLM responded in ${(elapsed / 1000).toFixed(1)}s`);
-
-  // Parse JSON from response (handle markdown fences)
-  const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
-  let picks;
-  try {
-    picks = JSON.parse(cleaned);
-  } catch (parseErr) {
-    console.error('Failed to parse LLM response as JSON:');
-    console.error(cleaned.substring(0, 500));
-    throw parseErr;
-  }
-
-  if (picks && !Array.isArray(picks) && typeof picks === 'object') {
-    const arrVal = Object.values(picks).find(v => Array.isArray(v));
-    if (arrVal) picks = arrVal;
-  }
-
-  if (!Array.isArray(picks) || picks.length === 0) {
-    throw new Error('LLM response is not a valid array');
-  }
-
-  console.log(`LLM selected ${picks.length} markets (${picks.filter(p => p.isRed).length} red)`);
-  return { picks, elapsed, model: AI_MODEL };
+  throw lastError || new Error('No AI providers configured (check API key env vars)');
 }
 
 // ============================================
@@ -1010,7 +1080,7 @@ function assembleOutput(candidates, llmResult) {
     candidateMap.set(String(m.id), m);
   }
 
-  const { picks, elapsed, model } = llmResult;
+  const { picks, elapsed, model, aiProvider } = llmResult;
   const markets = [];
 
   for (const pick of picks) {
@@ -1052,6 +1122,7 @@ function assembleOutput(candidates, llmResult) {
     meta: {
       generated: new Date().toISOString(),
       aiModel: model,
+      aiProvider: aiProvider || null,
       aiResponseMs: elapsed,
       aiMode: 'curated',
       candidateCount: candidates.length,
@@ -1088,7 +1159,7 @@ function buildFallbackOutput(candidates) {
 async function main() {
   console.log('=== Polymarket Report — Curation Run ===');
   console.log(`Time: ${new Date().toISOString()}`);
-  console.log(`Model: ${AI_MODEL}\n`);
+  console.log(`Providers: ${AI_PROVIDERS.map(p => p.name).join(' → ')}\n`);
 
   // Fetch all data
   const [allMarkets, whaleTrades] = await Promise.all([

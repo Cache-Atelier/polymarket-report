@@ -2,10 +2,10 @@ name: Curate Headlines
 
 on:
   schedule:
-    # 10am ET (15:00 UTC) — morning edition
-    - cron: '0 15 * * *'
-    # 7pm ET (00:00 UTC next day) — evening edition
-    - cron: '0 0 * * *'
+    - cron: '0 11 * * *'  # 6am ET
+    - cron: '0 17 * * *'  # 12pm ET
+    - cron: '0 23 * * *'  # 6pm ET
+    - cron: '0 5 * * *'   # 12am ET
   workflow_dispatch: # Allow manual trigger
 
 permissions:
@@ -27,8 +27,8 @@ jobs:
 
       - name: Generate headlines
         env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          AI_MODEL: ${{ vars.AI_MODEL || 'minimax-m2.5' }}
         run: node generate.js
 
       - name: Commit and push
