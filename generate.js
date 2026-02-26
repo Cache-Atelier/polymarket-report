@@ -111,6 +111,12 @@ const HARD_NOISE_PATTERNS = [
   // ---- YOUTUBE / STREAMING ----
   /\b(youtube|twitch|tiktok|kick)\b.*\b(views|subscribers|followers|likes|stream)\b/i,
   /\bsubscribers?\b.*\b(youtube|channel)\b/i,
+
+  // ---- NOVELTY / PARANORMAL ----
+  /\b(second coming|jesus christ return|rapture)\b/i,
+  /\baliens? exist\b/i,
+  /\bextraterrestrial life\b/i,
+  /\bUFO disclosure\b/i,
 ];
 
 // ============================================
@@ -134,6 +140,25 @@ const SOFT_NOISE_PATTERNS = [
     guidance: 'Sports markets are generally off-topic. Only include if the event has major political, economic, or cultural crossover (e.g., Olympics boycott, World Cup corruption scandal, stadium public funding debate).',
   },
 ];
+
+// ============================================
+// TOPIC KEYWORD EXTRACTION (used for clustering and grouping)
+// ============================================
+const STOP_WORDS = new Set([
+  'will','be','the','a','an','in','on','by','to','of','for','and','or',
+  'is','it','at','if','do','no','yes','not','this','that','with','from',
+  'has','have','was','are','been','its','than','before','after','during',
+  'between','about','into','over','under','more','most','what','when',
+  'who','how','which','their','there','these','those','other','new','first',
+  'us', 'end', '2025', '2026', '2027',
+]);
+
+function extractTopicKeys(question) {
+  return (question || '').toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+}
 
 // ============================================
 // DATA FETCHING
@@ -494,13 +519,26 @@ function rankAndEnrich(allMarkets, whaleTrades) {
     }
   }
 
+  // Filter out static long-shot markets (no movement, low probability, no whale interest)
+  const beforeStaticFilter = scorable.length;
+  const filtered = scorable.filter(m => {
+    if (m._isRecentlyResolved) return true; // always keep resolved
+    const absChange = Math.abs(m.oneDayPriceChange || 0);
+    const yesPrice = getYesPrice(m);
+    const hasWhale = !!m._whaleInfo;
+    // Near-zero movement + low probability + no whale = perpetual novelty, not news
+    if (absChange < 0.005 && yesPrice < 0.15 && !hasWhale) return false;
+    return true;
+  });
+  console.log(`Static long-shot filter: ${beforeStaticFilter} → ${filtered.length}`);
+
   // Sort by score
-  scorable.sort((a, b) => b._score - a._score);
+  filtered.sort((a, b) => b._score - a._score);
 
   // Event-level dedup: keep best per event, track group size
   const eventSeen = new Map();
   const deduped = [];
-  for (const m of scorable) {
+  for (const m of filtered) {
     const eSlug = m.events?.[0]?.slug || m._parentEventSlug || m.eventSlug || m.slug;
     if (eventSeen.has(eSlug)) {
       eventSeen.get(eSlug).count++;
@@ -526,25 +564,10 @@ function rankAndEnrich(allMarkets, whaleTrades) {
     }
   }
 
-  console.log(`Event dedup: ${scorable.length} → ${deduped.length}`);
+  console.log(`Event dedup: ${filtered.length} → ${deduped.length}`);
 
   // Topic-level cap (max 3 per topic cluster)
   const MAX_PER_TOPIC = 3;
-  const STOP_WORDS = new Set([
-    'will','be','the','a','an','in','on','by','to','of','for','and','or',
-    'is','it','at','if','do','no','yes','not','this','that','with','from',
-    'has','have','was','are','been','its','than','before','after','during',
-    'between','about','into','over','under','more','most','what','when',
-    'who','how','which','their','there','these','those','other','new','first',
-    'us', 'end', '2025', '2026', '2027',
-  ]);
-
-  function extractTopicKeys(question) {
-    return (question || '').toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
-      .split(/\s+/)
-      .filter(w => w.length > 2 && !STOP_WORDS.has(w));
-  }
 
   const topicClusters = [];
   for (const m of deduped) {
@@ -738,7 +761,7 @@ const EDITORIAL_SYSTEM_PROMPT = `You are the editor-in-chief of POLYMARKET REPOR
 
 You are being given a rich editorial briefing with market data, event context, resolution criteria, whale signals, recently resolved outcomes, and markets about to resolve. Take your time to think through what is truly newsworthy.
 
-YOUR JOB: From the briefing, select UP TO ${TOTAL_MARKETS} stories. Rank them by newsworthiness. Write a punchy headline for each. Choose the 4 most dramatic as red. Assign each a short topic label for grouping.
+YOUR JOB: From the briefing, select UP TO ${TOTAL_MARKETS} stories. Rank them by newsworthiness. Write a punchy headline for each. Flag exactly 4 as red (not counting #1, which is always red).
 
 ═══════════════════════════════════════════════
 EDITORIAL PRINCIPLES
@@ -758,11 +781,6 @@ EDITORIAL PRINCIPLES
    - Maximum 2-3 headlines on any single topic or geopolitical situation.
    - The page should feel like a broad scan of what's happening in the world.
    - If 8 candidates are about the same conflict, pick the 2 most distinct angles.
-
-4. IMMINENT RESOLUTION IS URGENT
-   - Markets resolving within 24 hours are ticking clocks — the outcome is about to be decided.
-   - These deserve attention even if volume or price change is modest.
-   - Frame them with urgency: "HOURS TO GO:", "DEADLINE LOOMS:", "DECISION IMMINENT:"
 
 ═══════════════════════════════════════════════
 HONESTY ABOUT CERTAINTY (CRITICAL)
@@ -802,18 +820,17 @@ LEAD STORY (#1):
 - Big movement, whale activity, or a confirmed resolution.
 - A market sitting still is NEVER the lead.
 
-RED FLAGS (4 total):
-- Choose the 4 most SHOCKING or SURPRISING headlines — the ones that make a reader stop scrolling.
-- Red headlines can appear ANYWHERE in the list, not just at the top. A story ranked #15 can be red if it's shocking.
-- Spread them out — do NOT cluster all 4 red headlines in positions #2-#5.
-- The main story (#1) is ALWAYS displayed as red by the frontend, so it does not need the isRed flag.
+RED FLAGS (exactly 4):
+- Flag exactly 4 headlines with isRed:true — the most SHOCKING or SURPRISING ones that make a reader stop scrolling.
+- The main story (#1) is ALWAYS displayed red by the frontend, so do NOT count it. Flag 4 OTHER headlines.
+- Red headlines can appear ANYWHERE in the list. A story ranked #15 can be red if it's shocking.
+- Spread them out — do NOT cluster all red headlines near the top.
 
-FINAL STEP — SEMANTIC GROUPING:
-After selecting and writing all your headlines, review the FULL list as a group.
-Reorder the array so that semantically related headlines are CONSECUTIVE.
-Then assign each headline a short topic label (1-3 words) — headlines you consider related MUST share the EXACT SAME label string.
-Do NOT just label individually — read all headlines together and decide what belongs together.
-The lead story (#1) stays at position #1. Reorder positions #2 onward.
+EDITORIAL TONE:
+- Every headline must describe something that ACTUALLY CHANGED — a shift, a resolution, a new development.
+- Do NOT write headlines about things merely "looming", "approaching", or being "watched". If nothing happened, it's not a headline.
+- Do NOT headline a market just because it's resolving soon. If the price didn't move, there's no story.
+- "Long-shot" or "remains unlikely" is NEVER a headline. If nothing changed, skip it.
 
 SOFT-FLAGGED MARKETS:
 - Some markets are flagged with ⚠ SOFT CATEGORY warnings (weather, entertainment, sports).
@@ -826,7 +843,7 @@ WHAT TO DROP:
 - Routine, predictable outcomes that aren't surprising
 
 OUTPUT: Return a JSON array only, no markdown fences, no commentary:
-[{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true,"topic":"short-label"},...]`;
+[{"id":"market_id","headline":"YOUR HEADLINE TEXT","isRed":true},...]`;
 
 // ============================================
 // LLM CALL (OpenCode Zen — OpenAI-compatible)
@@ -837,7 +854,7 @@ async function callLLM(briefing) {
     throw new Error('OPENCODE_API_KEY environment variable is required');
   }
 
-  const userPrompt = `Here is today's editorial briefing. Pick up to ${TOTAL_MARKETS} stories, rank by newsworthiness, write headlines, flag 2-4 as red.\n\n${briefing}`;
+  const userPrompt = `Here is today's editorial briefing. Pick up to ${TOTAL_MARKETS} stories, rank by newsworthiness, write headlines, flag exactly 4 as red (not counting #1).\n\n${briefing}`;
 
   console.log(`\nCalling ${AI_MODEL} via OpenCode Zen (${userPrompt.length} char prompt)...`);
   const t0 = Date.now();
@@ -903,6 +920,79 @@ async function callLLM(briefing) {
 }
 
 // ============================================
+// ALGORITHMIC HEADLINE GROUPING
+// ============================================
+
+function groupHeadlinesByTopic(markets) {
+  if (markets.length <= 1) return markets;
+
+  // Lead story stays at index 0; group the rest
+  const lead = markets[0];
+  const rest = markets.slice(1);
+
+  // Cluster by keyword overlap (2+ shared keywords = same cluster)
+  const clusters = [];
+  for (const m of rest) {
+    const keys = extractTopicKeys(m.question || '');
+    let bestCluster = null;
+    let bestOverlap = 0;
+    for (const cluster of clusters) {
+      const overlap = keys.filter(k => cluster.keys.has(k)).length;
+      if (overlap >= 2 && overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestCluster = cluster;
+      }
+    }
+    if (bestCluster) {
+      bestCluster.markets.push(m);
+      for (const k of keys) bestCluster.keys.add(k);
+    } else {
+      clusters.push({ keys: new Set(keys), markets: [m] });
+    }
+  }
+
+  // Assign topic labels: most common non-stop-word across the cluster's questions
+  for (const cluster of clusters) {
+    if (cluster.markets.length < 2) {
+      // Single-market cluster — no topic label needed
+      cluster.markets[0].topic = null;
+      continue;
+    }
+    // Count keyword frequency across all markets in this cluster
+    const freq = {};
+    for (const m of cluster.markets) {
+      const keys = extractTopicKeys(m.question || '');
+      for (const k of keys) freq[k] = (freq[k] || 0) + 1;
+    }
+    // Pick the keyword that appears in the most markets, prefer shorter labels
+    const sorted = Object.entries(freq)
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length);
+    const topicLabel = sorted.length > 0
+      ? sorted[0][0].charAt(0).toUpperCase() + sorted[0][0].slice(1)
+      : null;
+    for (const m of cluster.markets) m.topic = topicLabel;
+  }
+
+  // Sort clusters: larger clusters first, then by best market score within cluster
+  clusters.sort((a, b) => {
+    if (b.markets.length !== a.markets.length) return b.markets.length - a.markets.length;
+    const bestA = Math.max(...a.markets.map(m => m.score || 0));
+    const bestB = Math.max(...b.markets.map(m => m.score || 0));
+    return bestB - bestA;
+  });
+
+  // Flatten: lead + grouped rest
+  const grouped = [lead];
+  for (const cluster of clusters) {
+    grouped.push(...cluster.markets);
+  }
+
+  console.log(`Headline grouping: ${clusters.length} clusters from ${rest.length} headlines`);
+  return grouped;
+}
+
+// ============================================
 // ASSEMBLE FINAL OUTPUT
 // ============================================
 
@@ -925,7 +1015,6 @@ function assembleOutput(candidates, llmResult) {
       ...original,
       headline: pick.headline || null,
       isRed: !!pick.isRed,
-      topic: pick.topic || null,
       // Remove internal fields from output
       softNoiseFlags: undefined,
       siblingMarkets: undefined,
@@ -936,20 +1025,19 @@ function assembleOutput(candidates, llmResult) {
     console.warn(`WARNING: Only ${markets.length} markets matched — LLM may have returned bad IDs`);
   }
 
-  const topicCount = markets.filter(m => m.topic).length;
-  if (topicCount < markets.length * 0.5) {
-    console.warn(`WARNING: Only ${topicCount}/${markets.length} markets have topic labels`);
-  }
+  // Algorithmic semantic grouping: cluster related headlines together
+  const grouped = groupHeadlinesByTopic(markets);
 
   // Log the top headlines
   console.log('\n=== CURATED HEADLINES ===');
-  markets.slice(0, 10).forEach((m, i) => {
+  grouped.slice(0, 10).forEach((m, i) => {
     const red = m.isRed ? ' [RED]' : '';
-    console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 70)}"${red}`);
+    const topicTag = m.topic ? ` [${m.topic}]` : '';
+    console.log(`  #${i + 1}: "${(m.headline || m.question).substring(0, 60)}"${red}${topicTag}`);
   });
 
   return {
-    markets: markets.slice(0, TOTAL_MARKETS),
+    markets: grouped.slice(0, TOTAL_MARKETS),
     meta: {
       generated: new Date().toISOString(),
       aiModel: model,
