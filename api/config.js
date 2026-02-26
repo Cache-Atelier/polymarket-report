@@ -6,6 +6,7 @@
 // ============================================
 export const GAMMA_API = 'https://gamma-api.polymarket.com';
 export const DATA_API = 'https://data-api.polymarket.com';
+export const CLOB_API = 'https://clob.polymarket.com';
 
 // ============================================
 // AI PROVIDERS (tried in order)
@@ -70,6 +71,23 @@ export const TAG_SLUGS = [
   'ai',
 ];
 
+// Tag-gated filtering: Gamma API returns tags on each market.
+// Used in generate.js to hard-exclude off-topic markets.
+export const NOISE_TAG_SLUGS = new Set([
+  'sports', 'nfl', 'nba', 'mlb', 'nhl', 'soccer', 'tennis', 'golf',
+  'boxing', 'mma', 'racing', 'cricket', 'rugby', 'esports',
+  'entertainment', 'culture', 'pop-culture', 'music', 'movies', 'tv', 'gaming',
+  'crypto',
+]);
+
+export const RELEVANT_TAG_SLUGS = new Set([
+  'politics', 'geopolitics', 'elections', 'us-elections', 'global-elections',
+  'congress', 'courts', 'scotus', 'economy', 'economic-policy',
+  'fed', 'tariffs', 'trade-war', 'business', 'tech', 'ai',
+  'science', 'space', 'world', 'ukraine', 'middle-east', 'china',
+  'iran', 'israel', 'health', 'climate', 'finance',
+]);
+
 // ============================================
 // RANKING WEIGHTS
 // ============================================
@@ -88,6 +106,10 @@ export const WEIGHTS = {
 // A $10K market with a big swing is just illiquid, not news.
 export const VOLUME_FLOOR = 25_000;       // USD
 export const VOLUME_FLOOR_PENALTY = 0.4;  // Score multiplied by this when below floor
+
+// Spread: wide spread = illiquid = unreliable signal
+export const SPREAD_PENALTY_THRESHOLD = 0.10; // $0.10 spread
+export const SPREAD_PENALTY = 0.6;
 
 // Expiry drift: markets near deadline naturally swing to 0% or 100%.
 // That's not news — it's just a clock running out. Dampen those.

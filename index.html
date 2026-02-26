@@ -106,6 +106,8 @@
       font-weight: normal;
       text-decoration: none;
       white-space: nowrap;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 1px;
     }
 
     .headline.red .movement {
@@ -203,6 +205,10 @@
       .headline {
         font-size: 14px;
       }
+
+      .movement {
+        font-size: 0.7em;
+      }
     }
   </style>
 </head>
@@ -241,15 +247,42 @@
       }
     }
 
+    function priceToSparkline(prices) {
+      if (!prices || !Array.isArray(prices) || prices.length < 2) return null;
+      const blocks = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588'; // ▁▂▃▄▅▆▇█
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      const range = max - min;
+      if (range === 0) return blocks[3].repeat(Math.min(prices.length, 7));
+      // Sample down to 7 points if needed
+      let sampled = prices;
+      if (prices.length > 7) {
+        sampled = [];
+        for (let i = 0; i < 7; i++) {
+          const idx = Math.round(i * (prices.length - 1) / 6);
+          sampled.push(prices[idx]);
+        }
+      }
+      return sampled.map(p => {
+        const level = Math.min(Math.floor(((p - min) / range) * 7.99), 7);
+        return blocks[level];
+      }).join('');
+    }
+
     function formatHeadline(market) {
       const text = market.headline || market.question;
 
-      // Movement indicator — always shown unless change is negligible
-      const rawChange = market.oneDayPriceChange * 100;
+      // Movement indicator — sparkline if available, arrow fallback
       let movement = null;
-      if (Math.abs(rawChange) >= 0.1) {
-        const arrow = rawChange >= 0 ? '\u2191' : '\u2193';
-        movement = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
+      const sparkline = priceToSparkline(market.priceHistory);
+      if (sparkline) {
+        movement = sparkline;
+      } else {
+        const rawChange = market.oneDayPriceChange * 100;
+        if (Math.abs(rawChange) >= 0.1) {
+          const arrow = rawChange >= 0 ? '\u2191' : '\u2193';
+          movement = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
+        }
       }
 
       return {

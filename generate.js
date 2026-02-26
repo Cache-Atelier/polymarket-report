@@ -9,6 +9,9 @@
 // ============================================
 const GAMMA_API = 'https://gamma-api.polymarket.com';
 const DATA_API = 'https://data-api.polymarket.com';
+const CLOB_API = 'https://clob.polymarket.com';
+const PRICE_HISTORY_TOP_N = 15;
+const PRICE_HISTORY_CONCURRENCY = 5;
 
 const AI_PROVIDERS = [
   {
@@ -56,6 +59,9 @@ const WEIGHTS = {
 
 const VOLUME_FLOOR = 25_000;
 const VOLUME_FLOOR_PENALTY = 0.4;
+
+const SPREAD_PENALTY_THRESHOLD = 0.10; // $0.10 spread
+const SPREAD_PENALTY = 0.6;
 
 const EXPIRY_DRIFT = {
   daysThreshold: 7,
@@ -153,6 +159,25 @@ const SOFT_NOISE_PATTERNS = [
     guidance: 'Sports markets are generally off-topic. Only include if the event has major political, economic, or cultural crossover (e.g., Olympics boycott, World Cup corruption scandal, stadium public funding debate).',
   },
 ];
+
+// ============================================
+// TAG-GATED FILTERING (Gamma API returns tags on each market)
+// ============================================
+
+const NOISE_TAG_SLUGS = new Set([
+  'sports', 'nfl', 'nba', 'mlb', 'nhl', 'soccer', 'tennis', 'golf',
+  'boxing', 'mma', 'racing', 'cricket', 'rugby', 'esports',
+  'entertainment', 'culture', 'pop-culture', 'music', 'movies', 'tv', 'gaming',
+  'crypto',
+]);
+
+const RELEVANT_TAG_SLUGS = new Set([
+  'politics', 'geopolitics', 'elections', 'us-elections', 'global-elections',
+  'congress', 'courts', 'scotus', 'economy', 'economic-policy',
+  'fed', 'tariffs', 'trade-war', 'business', 'tech', 'ai',
+  'science', 'space', 'world', 'ukraine', 'middle-east', 'china',
+  'iran', 'israel', 'health', 'climate', 'finance',
+]);
 
 // ============================================
 // TOPIC KEYWORD EXTRACTION (used for clustering and grouping)
@@ -372,6 +397,25 @@ function classifyNoise(market) {
   return { excluded: false, softFlags };
 }
 
+function classifyByTags(market) {
+  const rawTags = market.tags;
+  if (!rawTags || !Array.isArray(rawTags) || rawTags.length === 0) {
+    return { action: 'soft-flag', reason: 'no tags', tags: [] };
+  }
+
+  const slugs = rawTags.map(t => {
+    if (typeof t === 'string') return t.toLowerCase();
+    return (t.slug || t.label || '').toLowerCase().replace(/\s+/g, '-');
+  }).filter(Boolean);
+
+  const hasRelevant = slugs.some(s => RELEVANT_TAG_SLUGS.has(s));
+  const hasNoise = slugs.some(s => NOISE_TAG_SLUGS.has(s));
+
+  if (hasRelevant) return { action: 'keep', reason: 'has relevant tag', tags: slugs };
+  if (hasNoise) return { action: 'exclude', reason: 'only noise tags', tags: slugs };
+  return { action: 'soft-flag', reason: 'unknown tags only', tags: slugs };
+}
+
 // ============================================
 // RANKING
 // ============================================
@@ -474,8 +518,23 @@ function rankAndEnrich(allMarkets, whaleTrades) {
     }
   }
 
+  // Tag-gated filtering (second pass)
+  let tagFilterCount = 0;
+  for (const [id, m] of marketMap) {
+    if (m._isRecentlyResolved) continue; // skip resolved
+    const tagResult = classifyByTags(m);
+    m._tagSlugs = tagResult.tags;
+    if (tagResult.action === 'exclude') {
+      marketMap.delete(id);
+      tagFilterCount++;
+    } else if (tagResult.action === 'soft-flag') {
+      if (!softFlagged.has(id)) softFlagged.set(id, []);
+      softFlagged.get(id).push({ category: 'tag-unknown', guidance: `${tagResult.reason}: tags=[${tagResult.tags.join(', ')}]. Only include if clearly newsworthy.` });
+    }
+  }
+
   const scorable = Array.from(marketMap.values());
-  console.log(`${allMarkets.length} raw → ${scorable.length} after dedup + hard filter (${hardFilterCount} noise removed, ${softFlagged.size} soft-flagged)`);
+  console.log(`${allMarkets.length} raw → ${scorable.length} after dedup + hard filter (${hardFilterCount} noise, ${tagFilterCount} tag-filtered, ${softFlagged.size} soft-flagged)`);
 
   if (scorable.length === 0) return [];
 
@@ -525,6 +584,8 @@ function rankAndEnrich(allMarkets, whaleTrades) {
              + (newTrendingSignal * WEIGHTS.newTrending);
 
     if ((m.volume24hr || 0) < VOLUME_FLOOR) m._score *= VOLUME_FLOOR_PENALTY;
+    const spread = parseFloat(m.spread || 0);
+    if (spread > SPREAD_PENALTY_THRESHOLD) m._score *= SPREAD_PENALTY;
     if (Math.abs(m.oneDayPriceChange || 0) < 0.005 && !whale) m._score *= 0.5;
     if (m._isFeatured) m._score *= WEIGHTS.featuredBoost;
 
@@ -636,7 +697,77 @@ function rankAndEnrich(allMarkets, whaleTrades) {
     eventGroupSize: m._eventGroupSize || 1,
     siblingMarkets: m._siblingMarkets || null,
     softNoiseFlags: softFlagged.get(m.id || m.conditionId) || null,
+    clobTokenIds: m.clobTokenIds || null,
+    resolutionSource: m.resolutionSource || null,
+    tags: m._tagSlugs || [],
   }));
+}
+
+// ============================================
+// PRICE HISTORY ENRICHMENT (CLOB API)
+// ============================================
+
+async function pMap(items, fn, concurrency) {
+  const results = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  );
+  return results;
+}
+
+async function fetchPriceHistory(market) {
+  try {
+    let tokenIds = market.clobTokenIds;
+    if (!tokenIds) return null;
+    if (typeof tokenIds === 'string') tokenIds = JSON.parse(tokenIds);
+    if (!Array.isArray(tokenIds) || tokenIds.length === 0) return null;
+    const yesTokenId = tokenIds[0];
+
+    const res = await fetch(
+      `${CLOB_API}/prices-history?market=${yesTokenId}&interval=1w&fidelity=1440`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.history || !Array.isArray(data.history) || data.history.length === 0) return null;
+
+    const sorted = data.history.sort((a, b) => a.t - b.t);
+    return sorted.map(p => parseFloat(p.p));
+  } catch {
+    return null;
+  }
+}
+
+async function enrichWithPriceHistory(candidates) {
+  const top = candidates.slice(0, PRICE_HISTORY_TOP_N);
+  if (top.length === 0) return;
+
+  const t0 = Date.now();
+  let enriched = 0;
+
+  await pMap(top, async (market) => {
+    const history = await fetchPriceHistory(market);
+    if (history && history.length >= 2) {
+      market.priceHistory = history;
+      const first = history[0];
+      const last = history[history.length - 1];
+      const delta = last - first;
+      market._priceTrend = {
+        direction: delta > 0.01 ? 'rising' : delta < -0.01 ? 'falling' : 'flat',
+        points: history.map(p => Math.round(p * 100)),
+        delta: Math.round(delta * 100),
+      };
+      enriched++;
+    }
+  }, PRICE_HISTORY_CONCURRENCY);
+
+  console.log(`Price history: ${enriched}/${top.length} enriched (${Date.now() - t0}ms)`);
 }
 
 // ============================================
@@ -752,6 +883,15 @@ function formatMarketForBriefing(market, isEventPrimary) {
 
   if (market.isFeatured) {
     lines.push(`  [Polymarket featured]`);
+  }
+
+  if (market._priceTrend) {
+    const trend = market._priceTrend;
+    lines.push(`  7d trend: ${trend.points.map(p => p + '%').join(' → ')} [${trend.direction}, ${trend.delta >= 0 ? '+' : ''}${trend.delta}pp]`);
+  }
+
+  if (market.resolutionSource) {
+    lines.push(`  Resolution source: ${market.resolutionSource}`);
   }
 
   if (market.softNoiseFlags) {
@@ -1094,9 +1234,11 @@ function assembleOutput(candidates, llmResult) {
       headline: pick.headline || null,
       isRed: !!pick.isRed,
       topic: pick.topic || null,
+      priceHistory: original.priceHistory || null,
       // Remove internal fields from output
       softNoiseFlags: undefined,
       siblingMarkets: undefined,
+      _priceTrend: undefined,
     });
   }
 
@@ -1176,6 +1318,9 @@ async function main() {
     console.error('No candidates after filtering — nothing to curate');
     process.exit(1);
   }
+
+  // Enrich top candidates with 7-day price history from CLOB API
+  await enrichWithPriceHistory(candidates);
 
   // Build editorial briefing
   const briefing = buildEditorialBriefing(candidates);
