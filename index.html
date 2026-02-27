@@ -101,29 +101,6 @@
       font-weight: bold;
     }
 
-    .movement {
-      font-size: 0.6em;
-      color: #000000;
-      font-weight: normal;
-      text-decoration: none;
-      white-space: nowrap;
-      font-family: 'Courier New', monospace;
-      letter-spacing: 0;
-      vertical-align: middle;
-      line-height: 1;
-    }
-
-    .headline.red .movement {
-      color: #CC0000;
-    }
-
-    #main-story .movement {
-      font-size: 0.45em;
-      color: #FF0000;
-      vertical-align: middle;
-      line-height: 1;
-    }
-
     .whale-tag {
       font-size: 10px;
       color: #FF0000;
@@ -162,7 +139,7 @@
       z-index: 10;
       text-align: center;
       font-family: 'Courier New', Courier, monospace;
-      font-size: 10px;
+      font-size: 11px;
       color: #666;
       text-transform: uppercase;
       background: #fff;
@@ -215,9 +192,6 @@
         font-size: 14px;
       }
 
-      .movement {
-        font-size: 0.55em;
-      }
     }
   </style>
 </head>
@@ -233,7 +207,7 @@
   <div id="error-message"></div>
 
   <div id="footer">
-    <span id="footer-timestamp"></span> · <span>BUY MY LLM A COFFEE: <span class="tip-address" id="tip-address" onclick="copyTipAddress()">0x5FBC8dA827bCF87979652d91AB7AF9Dd7E8ee3DD</span><span id="copied-flash"></span></span> · <a href="https://x.com/onchaindom" target="_blank">@ONCHAINDOM</a> · <a href="https://cacheatelier.work" target="_blank">Cache Atelier</a> me fecit
+    <span id="footer-timestamp"></span> · <span>BUY MY LLM A COFFEE: <span class="tip-address" id="tip-address" onclick="copyTipAddress()">0x5FBC8dA827bCF87979652d91AB7AF9Dd7E8ee3DD</span><span id="copied-flash"></span></span> · CONTACT: <a href="https://x.com/onchaindom" target="_blank">@ONCHAINDOM</a> · <a href="https://cacheatelier.work" target="_blank">Cache Atelier</a> me fecit
   </div>
 
   <script>
@@ -253,47 +227,11 @@
       }
     }
 
-    function priceToSparkline(prices) {
-      if (!prices || !Array.isArray(prices) || prices.length < 2) return null;
-      const blocks = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588'; // ▁▂▃▄▅▆▇█
-      const min = Math.min(...prices);
-      const max = Math.max(...prices);
-      const range = max - min;
-      if (range === 0) return blocks[3].repeat(Math.min(prices.length, 7));
-      // Sample down to 7 points if needed
-      let sampled = prices;
-      if (prices.length > 7) {
-        sampled = [];
-        for (let i = 0; i < 7; i++) {
-          const idx = Math.round(i * (prices.length - 1) / 6);
-          sampled.push(prices[idx]);
-        }
-      }
-      return sampled.map(p => {
-        const level = Math.min(Math.floor(((p - min) / range) * 7.99), 7);
-        return blocks[level];
-      }).join('');
-    }
-
     function formatHeadline(market) {
       const text = market.headline || market.question;
 
-      // Movement indicator — sparkline if available, arrow fallback
-      let movement = null;
-      const sparkline = priceToSparkline(market.priceHistory);
-      if (sparkline) {
-        movement = sparkline;
-      } else {
-        const rawChange = market.oneDayPriceChange * 100;
-        if (Math.abs(rawChange) >= 0.1) {
-          const arrow = rawChange >= 0 ? '\u2191' : '\u2193';
-          movement = `${arrow}${Math.abs(rawChange).toFixed(1)}%`;
-        }
-      }
-
       return {
         text,
-        movement,
         url: market.eventSlug
           ? `https://polymarket.com/event/${market.eventSlug}`
           : `https://polymarket.com/market/${market.slug}`,
@@ -319,13 +257,6 @@
       mainLink.target = '_blank';
       mainLink.textContent = mainStory.text;
       mainStoryEl.appendChild(mainLink);
-
-      if (mainStory.movement) {
-        const mvSpan = document.createElement('span');
-        mvSpan.className = 'movement';
-        mvSpan.textContent = ' ' + mainStory.movement;
-        mainLink.appendChild(mvSpan);
-      }
 
       if (mainStory.whaleSignal) {
         const tag = document.createElement('div');
@@ -383,12 +314,6 @@
             link.target = '_blank';
             link.className = 'headline' + (headline.isRed ? ' red' : '');
             link.textContent = headline.text;
-            if (headline.movement) {
-              const mvSpan = document.createElement('span');
-              mvSpan.className = 'movement';
-              mvSpan.textContent = ' ' + headline.movement;
-              link.appendChild(mvSpan);
-            }
             container.appendChild(link);
 
             if (headline.whaleSignal) {

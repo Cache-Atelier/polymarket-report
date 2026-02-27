@@ -967,39 +967,35 @@ HEADLINE STYLE
 - Write about what is happening IN THE WORLD — not about markets, bets, or traders.
 - NEVER include percentages, probabilities, dollar amounts, or market jargon.
 - NEVER use the word "odds" — it's betting language.
-- The frontend automatically appends a movement indicator — do NOT include one.
 - Question marks OK when genuinely uncertain (40-69%), but don't overuse.
 
 CAPS RULES (CRITICAL — read carefully):
 - The LEAD HEADLINE (#1) should be ALL CAPS — it's the banner story.
-- ALL OTHER HEADLINES: mostly lowercase. Use caps on ONE emphatic word or short phrase (1-2 words MAX).
-- Most headlines should look like a normal sentence with one PUNCH word in caps.
-- Do NOT capitalize 3+ words in a row (except headline #1).
+- ALL OTHER HEADLINES should be written in normal sentence case. NO all-caps words.
+- Do NOT use caps for emphasis. Write naturally — the headline's punchiness should come from word choice and verb strength, not capitalization.
+- The ONLY exception: proper nouns that are normally capitalized (e.g., "FBI", "NATO", "AI").
 
-GOOD headline examples (note: only 1-2 words are caps):
-  "Fed FREEZES rates..."
-  "DHS shutdown drags into third week..."
-  "Russian forces push into BILYTSKE..."
-  "Trump approval in FREEFALL..."
-  "Senate moves to rein in artificial INTELLIGENCE..."
-  "Iran back at the TABLE..."
-  "Starship set for next LAUNCH..."
-  "Weinstein headed to PRISON..."
+GOOD headline examples (note: NO caps for emphasis, just strong verbs):
+  "Fed freezes rates through spring..."
+  "DHS shutdown drags into third week"
+  "Russian forces push deep into Bilytske..."
+  "Trump approval craters after testimony"
+  "Senate moves to rein in artificial intelligence..."
+  "Iran back at the negotiating table..."
+  "Starship set for critical next launch..."
+  "Weinstein headed to prison..."
 
-BAD headline examples (TOO MANY caps — do NOT write like this):
-  "FED FREEZES RATES..." ← only #1 should be all-caps
-  "TRUMP APPROVAL IN FREEFALL..." ← way too many caps
-  "SENATE MOVES TO REIN IN AI..." ← not the lead, should not be all-caps
-  "Russian Forces PUSH INTO BILYTSKE..." ← 3 caps words is too many
-  "MOMENTUM BUILDS TOWARD STARSHIP..." ← only the lead gets full caps
+BAD headline examples (do NOT write like this):
+  "Fed FREEZES rates..." ← no caps for emphasis
+  "Trump approval in FREEFALL..." ← no caps for emphasis
+  "Senate MOVES to rein in AI..." ← no caps for emphasis
+  "Russian forces PUSH into Bilytske..." ← no caps for emphasis
+  "Momentum BUILDS toward Starship..." ← no caps for emphasis
 
 STYLISTIC TECHNIQUES:
 - Trailing ellipses (...) to create intrigue and imply a developing story. Use on ~30-50% of headlines.
-- Selective ALL CAPS for ONE key verb or dramatic word — NOT multi-word phrases.
-  Good: "Fed FREEZES rates..." / Bad: "FED FREEZES RATES..."
-  Good: "Trump approval in FREEFALL..." / Bad: "TRUMP APPROVAL IN FREEFALL..."
-- Short punchy verbs: push, slam, surge, crash, freeze, barrel, rein in, brace, loom.
-- NEVER passive voice. Not "rates expected to be held" but "Fed FREEZES rates."
+- Strong, active verbs do the work — no need for caps: push, slam, surge, crash, freeze, barrel, rein in, brace, crumble, shatter, torpedo, gut.
+- NEVER passive voice. Not "rates expected to be held" but "Fed freezes rates."
 
 ═══════════════════════════════════════════════
 PRICE DIRECTION — READ CAREFULLY
