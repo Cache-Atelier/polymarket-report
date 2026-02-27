@@ -10,14 +10,14 @@
 const GAMMA_API = 'https://gamma-api.polymarket.com';
 const DATA_API = 'https://data-api.polymarket.com';
 const CLOB_API = 'https://clob.polymarket.com';
-const PRICE_HISTORY_TOP_N = 15;
+const PRICE_HISTORY_TOP_N = 30;
 const PRICE_HISTORY_CONCURRENCY = 5;
 
 const AI_PROVIDERS = [
   {
-    name: 'openrouter-sonnet',
+    name: 'openrouter-opus',
     url: 'https://openrouter.ai/api/v1/chat/completions',
-    model: 'anthropic/claude-sonnet-4-6',
+    model: 'anthropic/claude-opus-4-6',
     envKey: 'OPENROUTER_API_KEY',
   },
   {
@@ -970,35 +970,32 @@ HEADLINE STYLE
 - The frontend automatically appends a movement indicator — do NOT include one.
 - Question marks OK when genuinely uncertain (40-69%), but don't overuse.
 
-DRUDGE-STYLE HEADLINE EXAMPLES (note the MIX of caps and lowercase — caps for EMPHASIS, not entire headline):
+CAPS RULES (CRITICAL — read carefully):
+- The LEAD HEADLINE (#1) should be ALL CAPS — it's the banner story.
+- ALL OTHER HEADLINES: mostly lowercase. Use caps on ONE emphatic word or short phrase (1-2 words MAX).
+- Most headlines should look like a normal sentence with one PUNCH word in caps.
+- Do NOT capitalize 3+ words in a row (except headline #1).
 
-  BEFORE: "Fed to hold interest rates steady in March"
-  AFTER:  "Fed FREEZES rates..."
+GOOD headline examples (note: only 1-2 words are caps):
+  "Fed FREEZES rates..."
+  "DHS shutdown drags into third week..."
+  "Russian forces push into BILYTSKE..."
+  "Trump approval in FREEFALL..."
+  "Senate moves to rein in artificial INTELLIGENCE..."
+  "Iran back at the TABLE..."
+  "Starship set for next LAUNCH..."
+  "Weinstein headed to PRISON..."
 
-  BEFORE: "DHS shutdown expected to last 21 days"
-  AFTER:  "DHS shutdown drags into THIRD WEEK"
-
-  BEFORE: "Russia advances toward Bilytske"
-  AFTER:  "Russian forces PUSH into Bilytske..."
-
-  BEFORE: "Trump approval rating drops 5 points"
-  AFTER:  "Trump approval in FREEFALL..."
-
-  BEFORE: "AI regulation bill introduced in Senate"
-  AFTER:  "Senate moves to REIN IN artificial intelligence..."
-
-  BEFORE: "Iran nuclear deal negotiations resume"
-  AFTER:  "Iran BACK at the table..."
-
-  BEFORE: "SpaceX Starship test flight scheduled"
-  AFTER:  "Starship set for NEXT LAUNCH..."
-
-  BEFORE: "Harvey Weinstein faces prison time"
-  AFTER:  "Weinstein HEADED TO PRISON..."
+BAD headline examples (TOO MANY caps — do NOT write like this):
+  "FED FREEZES RATES..." ← only #1 should be all-caps
+  "TRUMP APPROVAL IN FREEFALL..." ← way too many caps
+  "SENATE MOVES TO REIN IN AI..." ← not the lead, should not be all-caps
+  "Russian Forces PUSH INTO BILYTSKE..." ← 3 caps words is too many
+  "MOMENTUM BUILDS TOWARD STARSHIP..." ← only the lead gets full caps
 
 STYLISTIC TECHNIQUES:
 - Trailing ellipses (...) to create intrigue and imply a developing story. Use on ~30-50% of headlines.
-- Selective ALL CAPS for the key verb or dramatic phrase — NOT the entire headline.
+- Selective ALL CAPS for ONE key verb or dramatic word — NOT multi-word phrases.
   Good: "Fed FREEZES rates..." / Bad: "FED FREEZES RATES..."
   Good: "Trump approval in FREEFALL..." / Bad: "TRUMP APPROVAL IN FREEFALL..."
 - Short punchy verbs: push, slam, surge, crash, freeze, barrel, rein in, brace, loom.
@@ -1033,6 +1030,14 @@ FINAL STEP — SEMANTIC GROUPING:
 After selecting and writing all your headlines, review the FULL list as a group.
 Reorder the array so that semantically related headlines are CONSECUTIVE.
 Then assign each headline a short topic label (1-3 words) — headlines you consider related MUST share the EXACT SAME label string.
+
+GROUPING RULES:
+- Look for markets about the SAME PERSON, ENTITY, POLICY, or EVENT.
+- If two headlines mention the same person (e.g., both about a Fed Chair nominee), they MUST share the same topic label and be adjacent.
+- If two headlines are about the same geopolitical conflict, country, or policy area, group them.
+- Common failure mode: headlines about "Fed Chair Powell" and "Fed interest rates" end up separated — these should be grouped under "Federal Reserve" or similar.
+- Another failure mode: two headlines about the same political figure in different contexts get different labels — unify them.
+
 Do NOT just label individually — read all headlines together and decide what belongs together.
 Single-topic headlines that don't relate to anything else should get a unique label or null.
 The lead story (#1) stays at position #1. Reorder positions #2 onward.
