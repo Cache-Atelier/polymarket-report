@@ -33,19 +33,6 @@
         0.0215,
         0.0055
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          18,
-          10,
-          11,
-          9,
-          9,
-          2,
-          1
-        ],
-        "delta": -17
-      },
       "headline": null,
       "isRed": true,
       "topic": null
@@ -59,7 +46,7 @@
       "eventTitle": "GPT-5.3 released by...?",
       "oneDayPriceChange": -0.44,
       "volume24hr": 83971.81288499999,
-      "bestYesPrice": 0.043,
+      "bestYesPrice": 0.0615,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -82,22 +69,8 @@
         0.34,
         0.4,
         0.041,
-        0.062
+        0.0515
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          51,
-          26,
-          30,
-          28,
-          34,
-          40,
-          4,
-          6
-        ],
-        "delta": -44
-      },
       "headline": null,
       "isRed": true,
       "topic": null
@@ -111,7 +84,7 @@
       "eventTitle": "US Trade Deficit in 2026?",
       "oneDayPriceChange": -0.565,
       "volume24hr": 15755.825943999998,
-      "bestYesPrice": 0.19,
+      "bestYesPrice": 0.185,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -128,68 +101,8 @@
       "tags": [],
       "priceHistory": [
         0.45,
-        0.19
+        0.185
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          45,
-          19
-        ],
-        "delta": -26
-      },
-      "headline": null,
-      "isRed": false,
-      "topic": null
-    },
-    {
-      "id": "1335759",
-      "question": "Will Silver (SI) settle over $95 on the final trading day of February 2026?",
-      "description": "This market will resolve to \"Yes\" if the official CME settlement price for the Active Month of Silver futures on the final trading day of February 2026 is higher than the listed price. Otherwise, the market will resolve to \"No\".\n\nFor CME Silver (SI) futures contracts, the Active Month is the nearest of CME's designated delivery-cycle months (March, May, July, September, December) that is not the spot month. The Active Month becomes a non-active month effective on its First Position Date, at whic",
-      "slug": "will-silver-si-settle-over-95-on-the-final-trading-day-of-february-2026",
-      "eventSlug": "silver-si-above-end-of-february",
-      "eventTitle": "Silver (SI) above ___ end of February?",
-      "oneDayPriceChange": -0.61,
-      "volume24hr": 709.061486,
-      "bestYesPrice": 0.1,
-      "resolved": false,
-      "isRecentlyResolved": false,
-      "resolvedOutcome": null,
-      "resolvedTime": null,
-      "isImminentResolution": true,
-      "hoursUntilResolution": 9,
-      "endDate": "2026-02-28T00:00:00Z",
-      "whaleSignal": null,
-      "isFeatured": false,
-      "score": 0.076,
-      "eventGroupSize": 7,
-      "clobTokenIds": "[\"19025379066659969189575456235713715902168412508506626583735619257660239329903\", \"68833980871795295536141368496605365353475688929020364996992779698307987973704\"]",
-      "resolutionSource": null,
-      "tags": [],
-      "priceHistory": [
-        0.4,
-        0.405,
-        0.245,
-        0.23,
-        0.23,
-        0.26,
-        0.065,
-        0.1
-      ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          40,
-          41,
-          25,
-          23,
-          23,
-          26,
-          7,
-          10
-        ],
-        "delta": -30
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -222,14 +135,6 @@
         0.215,
         0.185
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          22,
-          19
-        ],
-        "delta": -3
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -243,7 +148,7 @@
       "eventTitle": "How many Tornadoes in the US in 2026?",
       "oneDayPriceChange": 0.175,
       "volume24hr": 5583.608887,
-      "bestYesPrice": 0.29,
+      "bestYesPrice": 0.285,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -263,15 +168,6 @@
         0.285,
         0.285
       ],
-      "_priceTrend": {
-        "direction": "rising",
-        "points": [
-          9,
-          28,
-          28
-        ],
-        "delta": 19
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -285,7 +181,7 @@
       "eventTitle": "Will Pete Hegseth ban Claude by March 31?",
       "oneDayPriceChange": -0.115,
       "volume24hr": 60527.00406699999,
-      "bestYesPrice": 0.235,
+      "bestYesPrice": 0.255,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -310,20 +206,44 @@
         0.415,
         0.255
       ],
-      "_priceTrend": {
-        "direction": "rising",
-        "points": [
-          18,
-          14,
-          13,
-          17,
-          27,
-          27,
-          42,
-          26
-        ],
-        "delta": 8
-      },
+      "headline": null,
+      "isRed": false,
+      "topic": null
+    },
+    {
+      "id": "1335759",
+      "question": "Will Silver (SI) settle over $95 on the final trading day of February 2026?",
+      "description": "This market will resolve to \"Yes\" if the official CME settlement price for the Active Month of Silver futures on the final trading day of February 2026 is higher than the listed price. Otherwise, the market will resolve to \"No\".\n\nFor CME Silver (SI) futures contracts, the Active Month is the nearest of CME's designated delivery-cycle months (March, May, July, September, December) that is not the spot month. The Active Month becomes a non-active month effective on its First Position Date, at whic",
+      "slug": "will-silver-si-settle-over-95-on-the-final-trading-day-of-february-2026",
+      "eventSlug": "silver-si-above-end-of-february",
+      "eventTitle": "Silver (SI) above ___ end of February?",
+      "oneDayPriceChange": -0.61,
+      "volume24hr": 709.061486,
+      "bestYesPrice": 0.11,
+      "resolved": false,
+      "isRecentlyResolved": false,
+      "resolvedOutcome": null,
+      "resolvedTime": null,
+      "isImminentResolution": true,
+      "hoursUntilResolution": 9,
+      "endDate": "2026-02-28T00:00:00Z",
+      "whaleSignal": null,
+      "isFeatured": false,
+      "score": 0.046,
+      "eventGroupSize": 7,
+      "clobTokenIds": "[\"19025379066659969189575456235713715902168412508506626583735619257660239329903\", \"68833980871795295536141368496605365353475688929020364996992779698307987973704\"]",
+      "resolutionSource": null,
+      "tags": [],
+      "priceHistory": [
+        0.4,
+        0.405,
+        0.245,
+        0.23,
+        0.23,
+        0.26,
+        0.065,
+        0.11
+      ],
       "headline": null,
       "isRed": false,
       "topic": null
@@ -337,7 +257,7 @@
       "eventTitle": "DeepSeek V4 released by...?",
       "oneDayPriceChange": 0.36,
       "volume24hr": 4966.102633,
-      "bestYesPrice": 0.5,
+      "bestYesPrice": 0.47,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -360,22 +280,8 @@
         0.695,
         0.57,
         0.535,
-        0.495
+        0.47
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          63,
-          56,
-          54,
-          65,
-          70,
-          57,
-          54,
-          50
-        ],
-        "delta": -13
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -389,7 +295,7 @@
       "eventTitle": "Russia strike impacts Kyiv municipality on...?",
       "oneDayPriceChange": -0.352,
       "volume24hr": 9783.777172,
-      "bestYesPrice": 0.0115,
+      "bestYesPrice": 0.0105,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -412,22 +318,8 @@
         0.125,
         0.185,
         0.0105,
-        0.0115
+        0.0105
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          16,
-          17,
-          15,
-          11,
-          13,
-          19,
-          1,
-          1
-        ],
-        "delta": -15
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -441,7 +333,7 @@
       "eventTitle": "Will Russia enter Ternuvate again by...?",
       "oneDayPriceChange": 0.121,
       "volume24hr": 32726.665823000007,
-      "bestYesPrice": 0.0585,
+      "bestYesPrice": 0.0475,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -464,22 +356,8 @@
         0.0745,
         0.366,
         0.1095,
-        0.058
+        0.0475
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          20,
-          11,
-          12,
-          4,
-          7,
-          37,
-          11,
-          6
-        ],
-        "delta": -14
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -518,20 +396,6 @@
         0.22,
         0.275
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          29,
-          31,
-          38,
-          31,
-          44,
-          28,
-          22,
-          28
-        ],
-        "delta": -1
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -545,7 +409,7 @@
       "eventTitle": "Fed decision in March?",
       "oneDayPriceChange": 0.006,
       "volume24hr": 662116.349533,
-      "bestYesPrice": 0.974,
+      "bestYesPrice": 0.9745,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -570,20 +434,6 @@
         0.9735,
         0.9745
       ],
-      "_priceTrend": {
-        "direction": "rising",
-        "points": [
-          94,
-          96,
-          96,
-          96,
-          96,
-          97,
-          97,
-          97
-        ],
-        "delta": 4
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -622,20 +472,6 @@
         0.0065,
         0.0005
       ],
-      "_priceTrend": {
-        "direction": "falling",
-        "points": [
-          4,
-          3,
-          4,
-          4,
-          3,
-          2,
-          1,
-          0
-        ],
-        "delta": -4
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -649,7 +485,7 @@
       "eventTitle": "Khamenei out as Supreme Leader of Iran by March 31?",
       "oneDayPriceChange": -0.01,
       "volume24hr": 476594.03034799965,
-      "bestYesPrice": 0.255,
+      "bestYesPrice": 0.225,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -672,22 +508,8 @@
         0.205,
         0.175,
         0.175,
-        0.255
+        0.225
       ],
-      "_priceTrend": {
-        "direction": "rising",
-        "points": [
-          25,
-          23,
-          22,
-          20,
-          21,
-          18,
-          18,
-          26
-        ],
-        "delta": 1
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -701,7 +523,7 @@
       "eventTitle": "US/Israel strikes Iran by...?",
       "oneDayPriceChange": -0.025,
       "volume24hr": 401308.80895900034,
-      "bestYesPrice": 0.27,
+      "bestYesPrice": 0.22,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -724,22 +546,8 @@
         0.18,
         0.105,
         0.085,
-        0.265
+        0.21
       ],
-      "_priceTrend": {
-        "direction": "rising",
-        "points": [
-          26,
-          19,
-          20,
-          21,
-          18,
-          11,
-          9,
-          27
-        ],
-        "delta": 1
-      },
       "headline": null,
       "isRed": false,
       "topic": null
@@ -753,7 +561,7 @@
       "eventTitle": "How many SpaceX Starship launches reach space in 2026?",
       "oneDayPriceChange": -0.175,
       "volume24hr": 3923.74,
-      "bestYesPrice": 0.345,
+      "bestYesPrice": 0.355,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -781,7 +589,7 @@
       "eventTitle": "Texas Democratic Senate Primary Winner",
       "oneDayPriceChange": -0.02,
       "volume24hr": 267802.55083100055,
-      "bestYesPrice": 0.285,
+      "bestYesPrice": 0.28,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -865,7 +673,7 @@
       "eventTitle": "Measles cases in U.S. by February 28?",
       "oneDayPriceChange": 0.144,
       "volume24hr": 20128.178603999993,
-      "bestYesPrice": 0.8505,
+      "bestYesPrice": 0.9995,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -948,7 +756,7 @@
       "eventTitle": "Bank of Japan Decision in April?",
       "oneDayPriceChange": 0.11,
       "volume24hr": 3716.081897000002,
-      "bestYesPrice": 0.47,
+      "bestYesPrice": 0.475,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -976,7 +784,7 @@
       "eventTitle": "Kevin Warsh formally nominated as Fed Chair by...?",
       "oneDayPriceChange": -0.038,
       "volume24hr": 44412.314161,
-      "bestYesPrice": 0.019,
+      "bestYesPrice": 0.0125,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -1004,7 +812,7 @@
       "eventTitle": "How long will the DHS shutdown last?",
       "oneDayPriceChange": 0.085,
       "volume24hr": 5665.355826,
-      "bestYesPrice": 0.255,
+      "bestYesPrice": 0.26,
       "resolved": false,
       "isRecentlyResolved": false,
       "resolvedOutcome": null,
@@ -1109,7 +917,7 @@
     }
   ],
   "meta": {
-    "generated": "2026-02-27T14:42:07.259Z",
+    "generated": "2026-02-27T15:23:28.983Z",
     "aiMode": "fallback",
     "candidateCount": 50
   }
