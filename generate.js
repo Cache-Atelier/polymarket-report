@@ -969,32 +969,13 @@ HEADLINE STYLE
 - NEVER use the word "odds" — it's betting language.
 - Question marks OK when genuinely uncertain (40-69%), but don't overuse.
 
-CAPS RULES (CRITICAL — read carefully):
-- The LEAD HEADLINE (#1) should be ALL CAPS — it's the banner story.
-- ALL OTHER HEADLINES should be written in normal sentence case. NO all-caps words.
-- Do NOT use caps for emphasis. Write naturally — the headline's punchiness should come from word choice and verb strength, not capitalization.
-- The ONLY exception: proper nouns that are normally capitalized (e.g., "FBI", "NATO", "AI").
-
-GOOD headline examples (note: NO caps for emphasis, just strong verbs):
-  "Fed freezes rates through spring..."
-  "DHS shutdown drags into third week"
-  "Russian forces push deep into Bilytske..."
-  "Trump approval craters after testimony"
-  "Senate moves to rein in artificial intelligence..."
-  "Iran back at the negotiating table..."
-  "Starship set for critical next launch..."
-  "Weinstein headed to prison..."
-
-BAD headline examples (do NOT write like this):
-  "Fed FREEZES rates..." ← no caps for emphasis
-  "Trump approval in FREEFALL..." ← no caps for emphasis
-  "Senate MOVES to rein in AI..." ← no caps for emphasis
-  "Russian forces PUSH into Bilytske..." ← no caps for emphasis
-  "Momentum BUILDS toward Starship..." ← no caps for emphasis
+CAPS:
+- The LEAD HEADLINE (#1) must be ALL CAPS.
+- For other headlines: if you want to emphasize one, make the WHOLE headline all caps. Don't capitalize random words mid-sentence for emphasis — either the whole thing is caps or none of it is.
 
 STYLISTIC TECHNIQUES:
 - Trailing ellipses (...) to create intrigue and imply a developing story. Use on ~30-50% of headlines.
-- Strong, active verbs do the work — no need for caps: push, slam, surge, crash, freeze, barrel, rein in, brace, crumble, shatter, torpedo, gut.
+- Short punchy verbs: push, slam, surge, crash, freeze, barrel, rein in, brace, crumble, shatter, torpedo, gut.
 - NEVER passive voice. Not "rates expected to be held" but "Fed freezes rates."
 
 ═══════════════════════════════════════════════
