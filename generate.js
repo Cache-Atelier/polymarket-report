@@ -1084,6 +1084,7 @@ async function callLLM(briefing) {
           ],
           temperature: 0.55,
           max_tokens: provider.maxTokens || 8192,
+          response_format: { type: 'json_object' },
         }),
       });
 
@@ -1106,15 +1107,30 @@ async function callLLM(briefing) {
 
       console.log(`${provider.name} responded in ${(elapsed / 1000).toFixed(1)}s`);
 
-      // Parse JSON from response (handle markdown fences)
+      // Parse JSON from response (handle markdown fences and prose preamble)
       const cleaned = content.replace(/```json?\s*/g, '').replace(/```\s*/g, '').trim();
       let picks;
       try {
         picks = JSON.parse(cleaned);
       } catch (parseErr) {
-        console.error('Failed to parse LLM response as JSON:');
-        console.error(cleaned.substring(0, 500));
-        throw parseErr;
+        // Model may have wrapped JSON in prose — try to extract the first JSON array or object
+        const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+        const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+        const candidate = arrayMatch?.[0] || objectMatch?.[0];
+        if (candidate) {
+          try {
+            picks = JSON.parse(candidate);
+            console.warn('Extracted JSON from prose-wrapped response');
+          } catch {
+            console.error('Failed to parse LLM response as JSON:');
+            console.error(cleaned.substring(0, 500));
+            throw parseErr;
+          }
+        } else {
+          console.error('Failed to parse LLM response as JSON:');
+          console.error(cleaned.substring(0, 500));
+          throw parseErr;
+        }
       }
 
       if (picks && !Array.isArray(picks) && typeof picks === 'object') {
