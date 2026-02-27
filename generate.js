@@ -400,7 +400,7 @@ function classifyNoise(market) {
 function classifyByTags(market) {
   const rawTags = market.tags;
   if (!rawTags || !Array.isArray(rawTags) || rawTags.length === 0) {
-    return { action: 'soft-flag', reason: 'no tags', tags: [] };
+    return { action: 'keep', reason: 'no tags (pre-filtered by tag endpoint)', tags: [] };
   }
 
   const slugs = rawTags.map(t => {
@@ -1282,6 +1282,7 @@ function buildFallbackOutput(candidates) {
     topic: null,
     softNoiseFlags: undefined,
     siblingMarkets: undefined,
+    _priceTrend: undefined,
   }));
 
   return {
@@ -1320,7 +1321,11 @@ async function main() {
   }
 
   // Enrich top candidates with 7-day price history from CLOB API
-  await enrichWithPriceHistory(candidates);
+  try {
+    await enrichWithPriceHistory(candidates);
+  } catch (err) {
+    console.error(`Price history enrichment failed (non-fatal): ${err.message}`);
+  }
 
   // Build editorial briefing
   const briefing = buildEditorialBriefing(candidates);
