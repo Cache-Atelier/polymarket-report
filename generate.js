@@ -991,11 +991,16 @@ LEAD STORY (#1):
 - Big movement, whale activity, or a confirmed resolution.
 - A market sitting still is NEVER the lead.
 
-RED FLAGS (exactly 4):
-- Flag exactly 4 headlines with isRed:true — the most SHOCKING or SURPRISING ones that make a reader stop scrolling.
-- The main story (#1) is ALWAYS displayed red by the frontend, so do NOT count it. Flag 4 OTHER headlines.
-- Red headlines can appear ANYWHERE in the list. A story ranked #15 can be red if it's shocking.
-- Spread them out — do NOT cluster all red headlines near the top.
+RED FLAGS (exactly 4) and ALL-CAPS — SUBJECT MATTER HIERARCHY:
+- Flag exactly 4 headlines with isRed:true. The main story (#1) is ALWAYS red, so do NOT count it. Flag 4 OTHER headlines.
+- Red headlines can appear ANYWHERE in the list. Spread them out.
+- When choosing which headlines get red and/or all-caps treatment, apply this hierarchy — higher tiers take priority:
+  TIER 1 (highest): War, armed conflict, military action, civilian casualties, national security crises, government bans or sanctions with security implications
+  TIER 2: Major political upheaval, constitutional crises, leadership changes in major powers, diplomatic breakthroughs or breakdowns
+  TIER 3: Economic policy with broad human impact (interest rates, shutdowns affecting workers), public health emergencies
+  TIER 4 (lowest): Corporate deals, individual net worth milestones, trade statistics, market valuations, celebrity/entertainment
+- A Tier 1 story with moderate movement should get red/caps OVER a Tier 4 story with big movement.
+- This hierarchy applies to red and all-caps selection ONLY — not to ranking or ordering.
 
 EDITORIAL TONE:
 - Every headline must describe something that ACTUALLY CHANGED — a shift, a resolution, a new development.
